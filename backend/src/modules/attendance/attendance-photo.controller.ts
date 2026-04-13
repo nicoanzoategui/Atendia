@@ -148,7 +148,8 @@ Si no podés determinar el estado con certeza, usá confidence menor a 0.7.`;
 
     const base64 = photo.buffer.toString('base64');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const modelId = process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash';
+    // gemini-2.0-flash was retired for new API keys; override with GEMINI_MODEL if Google renames again.
+    const modelId = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
     const model = genAI.getGenerativeModel({ model: modelId });
 
     let result: Awaited<ReturnType<typeof model.generateContent>>;
