@@ -5,20 +5,22 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   Cloud,
   Link2,
+  Loader2,
   MessageCircle,
   QrCode,
-  Radio,
   Share2,
   Wifi,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { getAuthToken } from '@/lib/db/indexed-db';
 import { useQrRotation } from '@/lib/hooks/use-qr-rotation';
 import { useRealtimeAttendance } from '@/lib/hooks/use-realtime-attendance';
 import { getPendingAttendance, savePendingAttendance } from '@/lib/db/pending-attendance-store';
@@ -135,7 +137,21 @@ function readJustificationNote(sessionId: string, studentId: string, att: Studen
   }
 }
 
-type TabId = 'qr' | 'nfc' | 'manual';
+type TabId = 'qr' | 'hoja' | 'manual';
+
+type PhotoAnalyzeRow = {
+  student_external_id: string;
+  student_name: string;
+  status: 'present' | 'absent' | 'excused';
+  confidence: number;
+};
+
+type PhotoAnalyzeResponse = {
+  results: PhotoAnalyzeRow[];
+  unmatched: unknown[];
+  total: number;
+  sessionId: string;
+};
 
 type FinalizedScreenState =
   | { source: 'qr'; scannedCount: number }
@@ -198,6 +214,13 @@ export default function TeacherSessionDetailPage() {
   const linkCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrAutoKickoffRef = useRef(false);
 
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoAnalyzing, setPhotoAnalyzing] = useState(false);
+  const [photoResults, setPhotoResults] = useState<PhotoAnalyzeRow[]>([]);
+  const [photoOverrides, setPhotoOverrides] = useState<Record<string, 'present' | 'absent' | 'excused'>>({});
+  const [photoSaving, setPhotoSaving] = useState(false);
+
   const load = useCallback(async () => {
     if (!sessionId) return;
     const [s, st] = await Promise.all([
@@ -255,7 +278,7 @@ export default function TeacherSessionDetailPage() {
   const rules = session ? sessionRules(session.status) : null;
 
   const generateQr = useCallback(() => {
-    setTab('nfc');
+    setTab('hoja');
     queueMicrotask(() => setTab('qr'));
   }, []);
 
@@ -279,6 +302,26 @@ export default function TeacherSessionDetailPage() {
       }
     }
   }, [sharePanelOpen]);
+
+  useEffect(() => {
+    if (!photoFile) {
+      setPhotoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(photoFile);
+    setPhotoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photoFile]);
+
+  useEffect(() => {
+    if (method !== 'hoja') {
+      setPhotoFile(null);
+      setPhotoResults([]);
+      setPhotoOverrides({});
+      setPhotoAnalyzing(false);
+      setPhotoSaving(false);
+    }
+  }, [method]);
 
   useEffect(() => {
     if (method !== 'qr') {
@@ -555,11 +598,17 @@ export default function TeacherSessionDetailPage() {
   type UiMode = TabId | 'selection';
   const uiMode: UiMode = method === null ? 'selection' : method;
   const showQrPanel = method === 'qr';
-  const showNfcPanel = method === 'nfc';
+  const showHojaPanel = method === 'hoja';
   const showManualPanel = method === 'manual';
   const tabs: { id: TabId; label: string; title: string; desc: string; Icon: typeof QrCode }[] = [
     { id: 'qr', label: 'QR', title: 'CÓDIGO QR', desc: 'ESCANEO DE PANTALLA', Icon: QrCode },
-    { id: 'nfc', label: 'NFC', title: 'LECTOR NFC', desc: 'CERCANÍA DE DISPOSITIVO', Icon: Radio },
+    {
+      id: 'hoja',
+      label: 'HOJA',
+      title: 'LISTA EN PAPEL',
+      desc: 'FOTO DE LISTA COMPLETADA',
+      Icon: Camera,
+    },
     {
       id: 'manual',
       label: 'MANUAL',
@@ -589,9 +638,9 @@ export default function TeacherSessionDetailPage() {
     headerSubtitle = 'REGISTRO POR SELECCIÓN';
     subtitleClass = 'atendee-subtitle mt-1';
     showSessionMetaUnderHeader = false;
-  } else if (uiMode === 'nfc') {
-    headerTitle = 'LECTOR NFC';
-    headerSubtitle = 'CERCANÍA DE DISPOSITIVO';
+  } else if (uiMode === 'hoja') {
+    headerTitle = 'LISTA EN PAPEL';
+    headerSubtitle = 'ANALIZAR FOTO CON IA';
     subtitleClass = 'atendee-subtitle mt-1';
     showSessionMetaUnderHeader = false;
   } else if (uiMode === 'qr') {
@@ -920,14 +969,228 @@ export default function TeacherSessionDetailPage() {
         </div>
       ) : null}
 
-      {showNfcPanel ? (
+      {showHojaPanel ? (
         <div className="space-y-4">
-          <div className="atendee-card border-2 border-[#BFDBFE] p-8 text-center shadow-sm">
-            <div className="mx-auto mb-6 flex h-52 w-52 items-center justify-center rounded-2xl bg-[#EEF2F7] text-[#1B3FD8]">
-              <Radio className="h-24 w-24" strokeWidth={1.25} />
-            </div>
-            <p className="atendee-muted mx-auto max-w-xs leading-relaxed">Próximamente</p>
+          <div className="atendee-card border border-gray-100 p-5 shadow-sm">
+            <label className="block cursor-pointer">
+              <input
+                type="file"
+                accept="image/*,capture=camera"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  setPhotoResults([]);
+                  setPhotoOverrides({});
+                  setPhotoFile(f ?? null);
+                  e.target.value = '';
+                }}
+              />
+              <div className="flex min-h-[160px] flex-col items-center justify-center rounded-[16px] border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-8 text-center transition hover:border-[#94A3B8]">
+                {photoPreviewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- preview from object URL
+                  <img
+                    src={photoPreviewUrl}
+                    alt="Vista previa de la lista"
+                    className="max-h-64 w-full max-w-sm rounded-[12px] object-contain"
+                  />
+                ) : (
+                  <>
+                    <Camera className="mx-auto mb-3 h-12 w-12 text-[#8A9BB5]" strokeWidth={1.5} />
+                    <p className="text-sm font-bold text-[#0D1B4B]">Tocá para elegir o sacar foto</p>
+                  </>
+                )}
+              </div>
+            </label>
+            <p className="atendee-muted mt-3 text-center text-xs font-semibold">
+              Sacá una foto a la lista completada
+            </p>
           </div>
+
+          {photoFile ? (
+            <button
+              type="button"
+              disabled={photoAnalyzing}
+              onClick={async () => {
+                if (!photoFile) return;
+                setPhotoAnalyzing(true);
+                setError(null);
+                try {
+                  const tokenData = await getAuthToken();
+                  const fd = new FormData();
+                  fd.append('photo', photoFile);
+                  fd.append('sessionId', sessionId);
+                  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+                  const res = await fetch(`${base}/attendance/analyze-photo`, {
+                    method: 'POST',
+                    headers: tokenData?.accessToken
+                      ? { Authorization: `Bearer ${tokenData.accessToken}` }
+                      : {},
+                    body: fd,
+                  });
+                  const raw = await res.text();
+                  if (!res.ok) {
+                    let msg = 'Error al analizar la imagen';
+                    try {
+                      const j = JSON.parse(raw) as { message?: string | string[] };
+                      const m = j.message;
+                      msg = Array.isArray(m) ? m.join(', ') : typeof m === 'string' ? m : msg;
+                    } catch {
+                      /* ignore */
+                    }
+                    throw new Error(msg);
+                  }
+                  const data = JSON.parse(raw) as PhotoAnalyzeResponse;
+                  setPhotoResults(Array.isArray(data.results) ? data.results : []);
+                  setPhotoOverrides({});
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Error al analizar');
+                } finally {
+                  setPhotoAnalyzing(false);
+                }
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#1B3FD8] py-3.5 text-sm font-black uppercase tracking-widest text-white transition hover:opacity-95 disabled:opacity-60"
+            >
+              {photoAnalyzing ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                  Analizando…
+                </>
+              ) : (
+                'ANALIZAR CON IA'
+              )}
+            </button>
+          ) : null}
+
+          {photoResults.length > 0 ? (
+            <div className="space-y-4">
+              <div className="overflow-hidden rounded-[16px] border border-gray-100 bg-white shadow-sm">
+                <ul className="divide-y divide-gray-100">
+                  {photoResults.map((row) => {
+                    const ext = row.student_external_id;
+                    const effective =
+                      photoOverrides[ext] ??
+                      (row.status === 'present' || row.status === 'absent' || row.status === 'excused'
+                        ? row.status
+                        : 'absent');
+                    const low = row.confidence < 0.7;
+                    const badge =
+                      effective === 'present'
+                        ? 'bg-green-100 text-green-800'
+                        : effective === 'excused'
+                          ? 'bg-slate-200 text-slate-800'
+                          : 'bg-red-100 text-red-800';
+                    const pct = Math.round(row.confidence * 100);
+                    return (
+                      <li key={ext || row.student_name} className="px-4 py-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-black uppercase tracking-wide text-[#0D1B4B]">
+                              {row.student_name}
+                            </p>
+                            <p className="atendee-muted mt-0.5 font-mono text-xs">ID: {ext || '—'}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${badge}`}
+                            >
+                              {effective === 'present'
+                                ? 'Presente'
+                                : effective === 'excused'
+                                  ? 'Justificado'
+                                  : 'Ausente'}
+                            </span>
+                            <span className="text-xs font-bold text-[#64748B]">{pct}% conf.</span>
+                          </div>
+                        </div>
+                        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
+                          <div
+                            className="h-full rounded-full bg-[#1B3FD8] transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        {low ? (
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPhotoOverrides((prev) => ({ ...prev, [ext]: 'present' }))
+                              }
+                              className="flex-1 rounded-[10px] border border-green-200 bg-green-50 py-2 text-[10px] font-black uppercase text-green-800"
+                            >
+                              P
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPhotoOverrides((prev) => ({ ...prev, [ext]: 'absent' }))
+                              }
+                              className="flex-1 rounded-[10px] border border-red-200 bg-red-50 py-2 text-[10px] font-black uppercase text-red-800"
+                            >
+                              A
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPhotoOverrides((prev) => ({ ...prev, [ext]: 'excused' }))
+                              }
+                              className="flex-1 rounded-[10px] border border-slate-300 bg-slate-100 py-2 text-[10px] font-black uppercase text-slate-800"
+                            >
+                              J
+                            </button>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+
+              <button
+                type="button"
+                disabled={photoSaving}
+                onClick={async () => {
+                  if (photoResults.length === 0) return;
+                  setPhotoSaving(true);
+                  setError(null);
+                  try {
+                    for (const row of photoResults) {
+                      const ext = row.student_external_id;
+                      const st =
+                        photoOverrides[ext] ??
+                        (row.status === 'present' || row.status === 'absent' || row.status === 'excused'
+                          ? row.status
+                          : 'absent');
+                      const s = students.find(
+                        (x) =>
+                          strField(x.student_external_id) === ext || strField(x.student_id) === ext,
+                      );
+                      if (!s) continue;
+                      const ui = st === 'excused' ? 'excused' : st === 'present' ? 'present' : 'absent';
+                      await postAttendance(s, ui);
+                    }
+                    setFinalizedScreen({ source: 'manual', markedCount: photoResults.length });
+                    setPhotoFile(null);
+                    setPhotoResults([]);
+                    setPhotoOverrides({});
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Error al guardar');
+                  } finally {
+                    setPhotoSaving(false);
+                  }
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-[#16A34A] py-4 text-xs font-black uppercase tracking-widest text-white transition hover:bg-green-700 disabled:opacity-50"
+              >
+                {photoSaving ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                    Guardando…
+                  </>
+                ) : (
+                  'CONFIRMAR Y GUARDAR ASISTENCIAS'
+                )}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
