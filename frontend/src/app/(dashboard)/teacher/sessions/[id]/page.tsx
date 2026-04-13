@@ -10,8 +10,11 @@ import {
   ChevronRight,
   ClipboardList,
   Cloud,
+  Link2,
+  MessageCircle,
   QrCode,
   Radio,
+  Share2,
   Wifi,
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -190,6 +193,9 @@ export default function TeacherSessionDetailPage() {
   const [justEditingKey, setJustEditingKey] = useState<string | null>(null);
   const [justInput, setJustInput] = useState('');
   const [justSavedNote, setJustSavedNote] = useState<Record<string, string>>({});
+  const [sharePanelOpen, setSharePanelOpen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const linkCopiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrAutoKickoffRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -259,8 +265,30 @@ export default function TeacherSessionDetailPage() {
   );
 
   useEffect(() => {
+    return () => {
+      if (linkCopiedTimeoutRef.current) clearTimeout(linkCopiedTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sharePanelOpen) {
+      setLinkCopied(false);
+      if (linkCopiedTimeoutRef.current) {
+        clearTimeout(linkCopiedTimeoutRef.current);
+        linkCopiedTimeoutRef.current = null;
+      }
+    }
+  }, [sharePanelOpen]);
+
+  useEffect(() => {
     if (method !== 'qr') {
       qrAutoKickoffRef.current = false;
+      setSharePanelOpen(false);
+      setLinkCopied(false);
+      if (linkCopiedTimeoutRef.current) {
+        clearTimeout(linkCopiedTimeoutRef.current);
+        linkCopiedTimeoutRef.current = null;
+      }
       return;
     }
     if (qrAutoKickoffRef.current) return;
@@ -710,6 +738,65 @@ export default function TeacherSessionDetailPage() {
               </p>
             ) : null}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setSharePanelOpen((o) => !o)}
+            className="flex w-full items-center justify-center gap-2 rounded-[12px] border border-gray-200 py-2.5 text-sm font-bold uppercase text-[#0D1B4B] outline outline-1 outline-gray-200"
+          >
+            <Share2 className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden />
+            COMPARTIR QR
+          </button>
+
+          {sharePanelOpen ? (
+            <div className="mt-3 rounded-[16px] border border-gray-100 bg-white p-4">
+              <button
+                type="button"
+                disabled={!token}
+                onClick={() => {
+                  if (!token) return;
+                  const qrToken = token;
+                  window.open(
+                    `https://wa.me/?text=${encodeURIComponent(
+                      'Código QR para registrar tu asistencia:\n\n' +
+                        qrToken +
+                        '\n\nIngresá a la app y escaneá el código.',
+                    )}`,
+                    '_blank',
+                    'noopener,noreferrer',
+                  );
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#25D366] py-3 font-bold text-white transition hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <MessageCircle className="h-5 w-5 shrink-0" strokeWidth={2.5} aria-hidden />
+                Compartir por WhatsApp
+              </button>
+              <button
+                type="button"
+                disabled={!token}
+                onClick={async () => {
+                  if (!token) return;
+                  const qrToken = token;
+                  const url = `${window.location.origin}/student/scan?token=${encodeURIComponent(qrToken)}`;
+                  try {
+                    await navigator.clipboard.writeText(url);
+                    setLinkCopied(true);
+                    if (linkCopiedTimeoutRef.current) clearTimeout(linkCopiedTimeoutRef.current);
+                    linkCopiedTimeoutRef.current = setTimeout(() => {
+                      setLinkCopied(false);
+                      linkCopiedTimeoutRef.current = null;
+                    }, 2000);
+                  } catch {
+                    setLinkCopied(false);
+                  }
+                }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#F1F5F9] py-3 font-bold text-[#0D1B4B] transition hover:bg-[#E2E8F0] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Link2 className="h-5 w-5 shrink-0" strokeWidth={2.5} aria-hidden />
+                {linkCopied ? '¡Copiado!' : 'Copiar link'}
+              </button>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <button

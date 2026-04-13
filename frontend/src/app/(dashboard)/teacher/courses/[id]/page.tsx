@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { CheckCircle2, ChevronLeft, MapPin, Wifi } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
@@ -54,6 +55,186 @@ function rawCourseNameField(s: ClassRow): string | undefined {
   if (cn == null) return undefined;
   const t = String(cn).trim();
   return t === '' ? undefined : String(cn);
+}
+
+type SessionStudentRow = {
+  student_name?: string | null;
+  student_external_id?: string | null;
+  student_id?: string | null;
+};
+
+function courseNameForPdf(session: ClassRow, fallbackTitle: string): string {
+  return (
+    rawProposalName(session) ??
+    rawEditionName(session) ??
+    rawCourseNameField(session) ??
+    fallbackTitle
+  );
+}
+
+function formatDateDDMMYYYY(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map((x) => Number(x));
+  if (!y || !m || !d) return isoDate;
+  return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+}
+
+function timeRange(session: ClassRow): string {
+  const a = session.start_time?.slice(0, 5) ?? '—';
+  const b = session.end_time?.slice(0, 5) ?? '—';
+  return `${a} - ${b}`;
+}
+
+function teacherDisplayFromUser(
+  user: { email?: string; full_name?: string; name?: string } | null,
+): string {
+  if (!user) return '—';
+  const n = (user.full_name ?? user.name ?? '').trim();
+  if (n) return n;
+  return (user.email ?? '—').trim() || '—';
+}
+
+async function generateAttendancePDF(
+  session: ClassRow,
+  courseTitle: string,
+  teacherLabel: string,
+): Promise<void> {
+  const students = await apiClient<SessionStudentRow[]>(
+    `/sessions/${encodeURIComponent(session.id)}/students`,
+  );
+  const list = Array.isArray(students) ? students : [];
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentW = pageW - margin * 2;
+  const pageBottom = pageH - 24;
+  let y = 18;
+
+  const courseLine = courseNameForPdf(session, courseTitle);
+  const dateStr = formatDateDDMMYYYY(session.date);
+  const horario = timeRange(session);
+  const aula = session.location_classroom || session.classroom || '—';
+  const sede = session.location_campus || '—';
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('LISTA DE ASISTENCIA', margin, y);
+  y += 10;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  for (const line of [
+    `Curso: ${courseLine}`,
+    `Fecha: ${dateStr}`,
+    `Horario: ${horario}`,
+    `Aula: ${aula}`,
+    `Sede: ${sede}`,
+    `Docente: ${teacherLabel}`,
+  ]) {
+    doc.text(line, margin, y);
+    y += 5.5;
+  }
+  y += 5;
+
+  const col = { num: 20, name: 80, id: 40, p: 30, a: 30, j: 35 } as const;
+  const sum = col.num + col.name + col.id + col.p + col.a + col.j;
+  const scale = contentW / sum;
+  const W = {
+    num: col.num * scale,
+    name: col.name * scale,
+    id: col.id * scale,
+    p: col.p * scale,
+    a: col.a * scale,
+    j: col.j * scale,
+  };
+  const rowH = 7;
+  const headerH = 8;
+  const headerLabels: [string, number][] = [
+    ['N°', W.num],
+    ['Nombre', W.name],
+    ['ID', W.id],
+    ['Presente', W.p],
+    ['Ausente', W.a],
+    ['Justificado', W.j],
+  ];
+
+  const drawHeaderRow = (top: number) => {
+    doc.setFillColor(230, 235, 245);
+    doc.setDrawColor(40, 40, 40);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    let cx = margin;
+    for (const [label, w] of headerLabels) {
+      doc.rect(cx, top, w, headerH, 'FD');
+      doc.text(label, cx + 1, top + 5.2);
+      cx += w;
+    }
+    doc.setFont('helvetica', 'normal');
+    return top + headerH;
+  };
+
+  y = drawHeaderRow(y);
+
+  const studentLabel = (s: SessionStudentRow, i: number) => {
+    const ext = s.student_external_id != null ? String(s.student_external_id) : '';
+    const nm =
+      s.student_name != null && String(s.student_name).trim() !== ''
+        ? String(s.student_name).trim()
+        : ext
+          ? `Alumno ${ext}`
+          : `Alumno ${i + 1}`;
+    return { nm, ext: ext || '—' };
+  };
+
+  list.forEach((s, i) => {
+    if (y + rowH > pageBottom) {
+      doc.addPage();
+      y = 18;
+      y = drawHeaderRow(y);
+    }
+    const { nm, ext } = studentLabel(s, i);
+    doc.setDrawColor(60, 60, 60);
+    doc.setFontSize(8);
+    let cx = margin;
+    doc.rect(cx, y, W.num, rowH, 'S');
+    doc.text(String(i + 1), cx + 1.5, y + 4.8);
+    cx += W.num;
+    doc.rect(cx, y, W.name, rowH, 'S');
+    doc.text(nm, cx + 1, y + 4.8, { maxWidth: W.name - 2 });
+    cx += W.name;
+    doc.rect(cx, y, W.id, rowH, 'S');
+    doc.text(ext, cx + 1, y + 4.8, { maxWidth: W.id - 2 });
+    cx += W.id;
+    doc.rect(cx, y, W.p, rowH, 'S');
+    cx += W.p;
+    doc.rect(cx, y, W.a, rowH, 'S');
+    cx += W.a;
+    doc.rect(cx, y, W.j, rowH, 'S');
+    y += rowH;
+  });
+
+  y += 8;
+  if (y + 22 > pageBottom) {
+    doc.addPage();
+    y = 18;
+  }
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Total alumnos: ${list.length}`, margin, y);
+  y += 7;
+  doc.text('Firma del docente: ________________', margin, y);
+  y += 7;
+  const genAt = new Date().toLocaleString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  doc.text(`Generado por Atendee · ${genAt}`, margin, y);
+
+  doc.save(`lista-asistencia-${session.date}.pdf`);
 }
 
 function isUnusableCourseTitle(value: string): boolean {
@@ -162,6 +343,7 @@ export default function TeacherCourseEditionPage() {
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user || !editionId) return;
@@ -185,6 +367,7 @@ export default function TeacherCourseEditionPage() {
 
   const title = useMemo(() => coursePageTitle(classes), [classes]);
   const teachersLine = useMemo(() => teachersSubtitle(classes), [classes]);
+  const teacherForPdf = useMemo(() => teacherDisplayFromUser(user), [user]);
 
   const sorted = useMemo(
     () => [...classes].sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b))),
@@ -270,22 +453,43 @@ export default function TeacherCourseEditionPage() {
                 <MapPin className="h-3.5 w-3.5 shrink-0" />
                 {locationLine(row)}
               </p>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {proxima ? (
-                  <Link
-                    href={`/teacher/sessions/${encodeURIComponent(row.id)}`}
-                    className="inline-flex flex-1 items-center justify-center rounded-[12px] bg-[#1B3FD8] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white sm:flex-none sm:min-w-[180px]"
+              <div className="mt-4 flex w-full flex-col">
+                <div className="flex flex-wrap items-center gap-2">
+                  {proxima ? (
+                    <Link
+                      href={`/teacher/sessions/${encodeURIComponent(row.id)}`}
+                      className="inline-flex flex-1 items-center justify-center rounded-[12px] bg-[#1B3FD8] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white sm:flex-none sm:min-w-[180px]"
+                    >
+                      TOMAR ASISTENCIA
+                    </Link>
+                  ) : (
+                    <Link
+                      href={`/teacher/sessions/${encodeURIComponent(row.id)}/detail`}
+                      className="inline-flex flex-1 items-center justify-center rounded-[12px] border-2 border-gray-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0D1B4B] transition hover:bg-gray-50 sm:flex-none sm:min-w-[160px]"
+                    >
+                      VER DETALLE
+                    </Link>
+                  )}
+                </div>
+                {row.status !== 'cancelled' ? (
+                  <button
+                    type="button"
+                    disabled={pdfLoadingId === row.id}
+                    className="mt-2 w-full rounded-[12px] border border-[#1B3FD8] py-2 text-xs font-bold uppercase text-[#1B3FD8] outline outline-1 outline-[#1B3FD8] transition hover:bg-[#1B3FD8]/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => {
+                      void (async () => {
+                        setPdfLoadingId(row.id);
+                        try {
+                          await generateAttendancePDF(row, title, teacherForPdf);
+                        } finally {
+                          setPdfLoadingId(null);
+                        }
+                      })();
+                    }}
                   >
-                    TOMAR ASISTENCIA
-                  </Link>
-                ) : (
-                  <Link
-                    href={`/teacher/sessions/${encodeURIComponent(row.id)}/detail`}
-                    className="inline-flex flex-1 items-center justify-center rounded-[12px] border-2 border-gray-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0D1B4B] transition hover:bg-gray-50 sm:flex-none sm:min-w-[160px]"
-                  >
-                    VER DETALLE
-                  </Link>
-                )}
+                    {pdfLoadingId === row.id ? 'Generando...' : '↓ Descargar lista'}
+                  </button>
+                ) : null}
               </div>
             </li>
           );
