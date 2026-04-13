@@ -975,7 +975,8 @@ export default function TeacherSessionDetailPage() {
             <label className="block cursor-pointer">
               <input
                 type="file"
-                accept="image/*,capture=camera"
+                accept="image/*"
+                capture="environment"
                 className="sr-only"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -996,13 +997,15 @@ export default function TeacherSessionDetailPage() {
                 ) : (
                   <>
                     <Camera className="mx-auto mb-3 h-12 w-12 text-[#8A9BB5]" strokeWidth={1.5} />
-                    <p className="text-sm font-bold text-[#0D1B4B]">Tocá para elegir o sacar foto</p>
+                    <p className="text-sm font-bold text-[#0D1B4B]">
+                      Tocá para abrir la cámara y sacar la foto
+                    </p>
                   </>
                 )}
               </div>
             </label>
             <p className="atendee-muted mt-3 text-center text-xs font-semibold">
-              Sacá una foto a la lista completada
+              Fotografiá la lista completada con la cámara trasera
             </p>
           </div>
 
