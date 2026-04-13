@@ -2,6 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  HttpException,
+  HttpStatus,
+  Logger,
   Post,
   ServiceUnavailableException,
   UploadedFile,
@@ -49,9 +52,26 @@ function extractJsonArray(text: string): GeminiRow[] {
   return parsed as GeminiRow[];
 }
 
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
+function inlineMimeType(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m === 'image/jpg') return 'image/jpeg';
+  return m;
+}
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('attendance')
 export class AttendancePhotoController {
+  private readonly logger = new Logger(AttendancePhotoController.name);
+
   constructor(private readonly supabaseService: SupabaseService) {}
 
   @Roles('teacher')
@@ -73,8 +93,8 @@ export class AttendancePhotoController {
       throw new BadRequestException('Archivo photo requerido (jpg/png)');
     }
     const mime = (photo.mimetype || '').toLowerCase();
-    if (!['image/jpeg', 'image/jpg', 'image/png'].includes(mime)) {
-      throw new BadRequestException('Formato de imagen no soportado; usá JPG o PNG');
+    if (!ALLOWED_IMAGE_MIMES.has(mime)) {
+      throw new BadRequestException('Formato de imagen no soportado (JPG, PNG, WEBP o HEIC)');
     }
 
     const apiKey = process.env.GEMINI_API_KEY?.trim();
@@ -128,19 +148,45 @@ Si no podés determinar el estado con certeza, usá confidence menor a 0.7.`;
 
     const base64 = photo.buffer.toString('base64');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const modelId = process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash';
+    const model = genAI.getGenerativeModel({ model: modelId });
 
-    const result = await model.generateContent([
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType: mime === 'image/jpg' ? 'image/jpeg' : mime,
-          data: base64,
+    let result: Awaited<ReturnType<typeof model.generateContent>>;
+    try {
+      result = await model.generateContent([
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: inlineMimeType(mime),
+            data: base64,
+          },
         },
-      },
-    ]);
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Gemini generateContent failed (${modelId}): ${msg}`);
+      throw new HttpException(
+        `No se pudo analizar la imagen con el modelo (${modelId}). ${msg}`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
 
-    const text = result.response.text();
+    const response = result.response;
+    let text: string;
+    try {
+      text = response.text();
+    } catch {
+      const block = response.promptFeedback?.blockReason;
+      const finish = response.candidates?.[0]?.finishReason;
+      this.logger.warn(
+        `Gemini sin texto útil: blockReason=${block ?? '—'} finishReason=${finish ?? '—'}`,
+      );
+      throw new BadRequestException(
+        block
+          ? `La imagen fue rechazada por la política del modelo (${block}). Probá otra foto o iluminación.`
+          : 'El modelo no devolvió texto. Probá otra foto más nítida.',
+      );
+    }
     let parsed: GeminiRow[];
     try {
       parsed = extractJsonArray(text);

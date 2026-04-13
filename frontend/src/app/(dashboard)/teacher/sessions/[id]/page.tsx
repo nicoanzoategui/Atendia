@@ -240,6 +240,47 @@ export default function TeacherSessionDetailPage() {
     setPendingIds(new Set(manualPending.map((p) => p.student_id)));
   }, [sessionId]);
 
+  const analyzeAttendancePhoto = useCallback(
+    async (file: File) => {
+      setPhotoAnalyzing(true);
+      setError(null);
+      try {
+        const tokenData = await getAuthToken();
+        const fd = new FormData();
+        fd.append('photo', file);
+        fd.append('sessionId', sessionId);
+        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+        const res = await fetch(`${base}/attendance/analyze-photo`, {
+          method: 'POST',
+          headers: tokenData?.accessToken
+            ? { Authorization: `Bearer ${tokenData.accessToken}` }
+            : {},
+          body: fd,
+        });
+        const raw = await res.text();
+        if (!res.ok) {
+          let msg = 'Error al analizar la imagen';
+          try {
+            const j = JSON.parse(raw) as { message?: string | string[] };
+            const m = j.message;
+            msg = Array.isArray(m) ? m.join(', ') : typeof m === 'string' ? m : msg;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg);
+        }
+        const data = JSON.parse(raw) as PhotoAnalyzeResponse;
+        setPhotoResults(Array.isArray(data.results) ? data.results : []);
+        setPhotoOverrides({});
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Error al analizar');
+      } finally {
+        setPhotoAnalyzing(false);
+      }
+    },
+    [sessionId],
+  );
+
   useEffect(() => {
     if (!user || !sessionId) return;
     let cancelled = false;
@@ -398,12 +439,6 @@ export default function TeacherSessionDetailPage() {
     } finally {
       setActionLoading(null);
     }
-  }
-
-  async function cancelSession() {
-    const comment =
-      typeof window !== 'undefined' ? window.prompt('Motivo de cancelación', '') : '';
-    await patchAction('/cancel', { comment: comment ?? '' });
   }
 
   const scannedCount = useMemo(() => {
@@ -697,16 +732,6 @@ export default function TeacherSessionDetailPage() {
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        {method !== null && method !== 'manual' && method !== 'qr' && rules.showOpen ? (
-          <button
-            type="button"
-            disabled={!!actionLoading}
-            onClick={() => patchAction('/open')}
-            className="rounded-[14px] bg-[#16A34A] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
-          >
-            {actionLoading === '/open' ? '…' : 'Abrir asistencia'}
-          </button>
-        ) : null}
         {rules.showClose && !showQrPanel ? (
           <button
             type="button"
@@ -715,16 +740,6 @@ export default function TeacherSessionDetailPage() {
             className="rounded-[14px] bg-[#0D1B4B] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
           >
             {actionLoading === '/close' ? '…' : 'Cerrar asistencia'}
-          </button>
-        ) : null}
-        {method !== null && method !== 'manual' && method !== 'qr' && rules.showCancel ? (
-          <button
-            type="button"
-            disabled={!!actionLoading}
-            onClick={cancelSession}
-            className="rounded-[14px] border-2 border-red-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-red-600 disabled:opacity-50"
-          >
-            Cancelar clase
           </button>
         ) : null}
       </div>
@@ -984,9 +999,12 @@ export default function TeacherSessionDetailPage() {
                   setPhotoOverrides({});
                   setPhotoFile(f ?? null);
                   e.target.value = '';
+                  if (f) {
+                    void analyzeAttendancePhoto(f);
+                  }
                 }}
               />
-              <div className="flex min-h-[160px] flex-col items-center justify-center rounded-[16px] border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-8 text-center transition hover:border-[#94A3B8]">
+              <div className="relative flex min-h-[160px] flex-col items-center justify-center overflow-hidden rounded-[16px] border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-8 text-center transition hover:border-[#94A3B8]">
                 {photoPreviewUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- preview from object URL
                   <img
@@ -1002,65 +1020,25 @@ export default function TeacherSessionDetailPage() {
                     </p>
                   </>
                 )}
+                {photoAnalyzing ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[14px] bg-white/85 backdrop-blur-[2px]">
+                    <Loader2 className="h-8 w-8 animate-spin text-[#1B3FD8]" aria-hidden />
+                    <span className="text-xs font-black uppercase tracking-widest text-[#0D1B4B]">
+                      Analizando…
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </label>
-            <p className="atendee-muted mt-3 text-center text-xs font-semibold">
-              Fotografiá la lista completada con la cámara trasera
-            </p>
           </div>
 
-          {photoFile ? (
+          {error && photoFile && !photoAnalyzing && photoResults.length === 0 ? (
             <button
               type="button"
-              disabled={photoAnalyzing}
-              onClick={async () => {
-                if (!photoFile) return;
-                setPhotoAnalyzing(true);
-                setError(null);
-                try {
-                  const tokenData = await getAuthToken();
-                  const fd = new FormData();
-                  fd.append('photo', photoFile);
-                  fd.append('sessionId', sessionId);
-                  const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-                  const res = await fetch(`${base}/attendance/analyze-photo`, {
-                    method: 'POST',
-                    headers: tokenData?.accessToken
-                      ? { Authorization: `Bearer ${tokenData.accessToken}` }
-                      : {},
-                    body: fd,
-                  });
-                  const raw = await res.text();
-                  if (!res.ok) {
-                    let msg = 'Error al analizar la imagen';
-                    try {
-                      const j = JSON.parse(raw) as { message?: string | string[] };
-                      const m = j.message;
-                      msg = Array.isArray(m) ? m.join(', ') : typeof m === 'string' ? m : msg;
-                    } catch {
-                      /* ignore */
-                    }
-                    throw new Error(msg);
-                  }
-                  const data = JSON.parse(raw) as PhotoAnalyzeResponse;
-                  setPhotoResults(Array.isArray(data.results) ? data.results : []);
-                  setPhotoOverrides({});
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : 'Error al analizar');
-                } finally {
-                  setPhotoAnalyzing(false);
-                }
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-[12px] bg-[#1B3FD8] py-3.5 text-sm font-black uppercase tracking-widest text-white transition hover:opacity-95 disabled:opacity-60"
+              onClick={() => void analyzeAttendancePhoto(photoFile)}
+              className="flex w-full items-center justify-center gap-2 rounded-[12px] border-2 border-[#1B3FD8] bg-white py-3.5 text-sm font-black uppercase tracking-widest text-[#1B3FD8] transition hover:bg-[#F8FAFC]"
             >
-              {photoAnalyzing ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                  Analizando…
-                </>
-              ) : (
-                'ANALIZAR CON IA'
-              )}
+              Reintentar análisis
             </button>
           ) : null}
 
