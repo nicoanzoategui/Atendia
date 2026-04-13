@@ -17,20 +17,37 @@ export class AttendanceService {
     const qrData = this.qrService.validateToken(token);
     
     // Check if student is enrolled in this session
-    const { data: studentUser } = await this.supabaseService.getClient()
+    const { data: studentUser, error: userErr } = await this.supabaseService.getClient()
       .from('app_user')
       .select('id, external_id')
       .eq('id', studentId)
       .single();
 
-    const { data: enrollment, error: enrollError } = await this.supabaseService.getClient()
+    if (userErr || !studentUser) {
+      throw new BadRequestException('Usuario no encontrado');
+    }
+
+    // Roster rows from integración suelen tener solo student_external_id (student_id NULL).
+    // Comparar en memoria evita filtros .or() frágiles y permite trim / mayúsculas.
+    const { data: rosterRows, error: rosterErr } = await this.supabaseService.getClient()
       .from('class_session_student')
       .select('*')
-      .eq('class_session_id', qrData.class_id)
-      .or(`student_id.eq.${studentId},student_external_id.eq.${studentUser?.external_id || '__none__'}`)
-      .maybeSingle();
+      .eq('class_session_id', qrData.class_id);
 
-    if (enrollError || !enrollment) {
+    if (rosterErr) {
+      throw new BadRequestException(rosterErr.message);
+    }
+
+    const norm = (v: string | null | undefined) => (v ?? '').trim().toLowerCase();
+    const userExt = norm(studentUser.external_id);
+
+    const enrollment = (rosterRows ?? []).find((r) => {
+      if (r.student_id != null && String(r.student_id) === String(studentId)) return true;
+      if (userExt !== '' && norm(r.student_external_id) === userExt) return true;
+      return false;
+    });
+
+    if (!enrollment) {
       throw new BadRequestException('No estás inscrito en esta sesión');
     }
 
