@@ -986,51 +986,53 @@ export default function TeacherSessionDetailPage() {
 
       {showHojaPanel ? (
         <div className="space-y-4">
-          <div className="atendee-card border border-gray-100 p-5 shadow-sm">
-            <label className="block cursor-pointer">
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="sr-only"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  setPhotoResults([]);
-                  setPhotoOverrides({});
-                  setPhotoFile(f ?? null);
-                  e.target.value = '';
-                  if (f) {
-                    void analyzeAttendancePhoto(f);
-                  }
-                }}
-              />
-              <div className="relative flex min-h-[160px] flex-col items-center justify-center overflow-hidden rounded-[16px] border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-8 text-center transition hover:border-[#94A3B8]">
-                {photoPreviewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- preview from object URL
-                  <img
-                    src={photoPreviewUrl}
-                    alt="Vista previa de la lista"
-                    className="max-h-64 w-full max-w-sm rounded-[12px] object-contain"
-                  />
-                ) : (
-                  <>
-                    <Camera className="mx-auto mb-3 h-12 w-12 text-[#8A9BB5]" strokeWidth={1.5} />
-                    <p className="text-sm font-bold text-[#0D1B4B]">
-                      Tocá para abrir la cámara y sacar la foto
-                    </p>
-                  </>
-                )}
-                {photoAnalyzing ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[14px] bg-white/85 backdrop-blur-[2px]">
-                    <Loader2 className="h-8 w-8 animate-spin text-[#1B3FD8]" aria-hidden />
-                    <span className="text-xs font-black uppercase tracking-widest text-[#0D1B4B]">
-                      Analizando…
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </label>
-          </div>
+          {photoResults.length === 0 ? (
+            <div className="atendee-card border border-gray-100 p-5 shadow-sm">
+              <label className="block cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    setPhotoResults([]);
+                    setPhotoOverrides({});
+                    setPhotoFile(f ?? null);
+                    e.target.value = '';
+                    if (f) {
+                      void analyzeAttendancePhoto(f);
+                    }
+                  }}
+                />
+                <div className="relative flex min-h-[160px] flex-col items-center justify-center overflow-hidden rounded-[16px] border-2 border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-8 text-center transition hover:border-[#94A3B8]">
+                  {photoPreviewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- preview from object URL
+                    <img
+                      src={photoPreviewUrl}
+                      alt="Vista previa de la lista"
+                      className="max-h-64 w-full max-w-sm rounded-[12px] object-contain"
+                    />
+                  ) : (
+                    <>
+                      <Camera className="mx-auto mb-3 h-12 w-12 text-[#8A9BB5]" strokeWidth={1.5} />
+                      <p className="text-sm font-bold text-[#0D1B4B]">
+                        Tocá para abrir la cámara y sacar la foto
+                      </p>
+                    </>
+                  )}
+                  {photoAnalyzing ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[14px] bg-white/85 backdrop-blur-[2px]">
+                      <Loader2 className="h-8 w-8 animate-spin text-[#1B3FD8]" aria-hidden />
+                      <span className="text-xs font-black uppercase tracking-widest text-[#0D1B4B]">
+                        Analizando…
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </label>
+            </div>
+          ) : null}
 
           {error && photoFile && !photoAnalyzing && photoResults.length === 0 ? (
             <button
