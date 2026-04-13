@@ -1,0 +1,27 @@
+# Dependencies (workspace root + packages)
+node_modules/
+
+# Env and secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Builds
+dist/
+.next/
+out/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Local / tooling
+.cursor/
+.claude/
+*.log
+npm-debug.log*

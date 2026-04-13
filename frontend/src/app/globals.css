@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@plugin "flowbite/plugin";
+@source "../node_modules/flowbite-react";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Atendee design system (wireframes) */
+:root {
+  --atendee-bg: #eef2f7;
+  --atendee-heading: #0d1b4b;
+  --atendee-accent: #1b3fd8;
+  --atendee-muted: #8a9bb5;
+  --atendee-green: #16a34a;
+  --atendee-green-bg: #dcfce7;
+}
+
+@layer components {
+  .atendee-page {
+    @apply bg-[#EEF2F7] min-h-0;
+  }
+  .atendee-card {
+    @apply bg-white rounded-[20px] border-0 shadow-sm;
+  }
+  .atendee-heading {
+    @apply text-[#0D1B4B] font-black uppercase tracking-widest;
+  }
+  .atendee-subtitle {
+    @apply text-[#1B3FD8] font-bold uppercase tracking-widest text-xs;
+  }
+  .atendee-muted {
+    @apply text-[#8A9BB5] uppercase tracking-widest text-xs font-bold;
+  }
+  .atendee-badge-online {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-[#DCFCE7] px-3 py-1 text-xs font-bold text-[#16A34A];
+  }
+}

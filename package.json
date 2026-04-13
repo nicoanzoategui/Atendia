@@ -1,0 +1,17 @@
+{
+  "name": "atendee-monorepo",
+  "private": true,
+  "packageManager": "npm@10.2.4",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "latest"
+  }
+}
