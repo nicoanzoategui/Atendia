@@ -15,6 +15,43 @@ import {
   teacherDisplayFromUser,
 } from '@/lib/teacher-session-display';
 
+const TEACHER_DEMO_EXTRA_SESSIONS = 5;
+
+function isTeacherDemoCalendarUser(user: { email?: string } | null): boolean {
+  return (user?.email?.toLowerCase().includes('@demo.') ?? false) === true;
+}
+
+function addCalendarDays(ymd: string, deltaDays: number): string {
+  const [y, mo, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, mo - 1, d);
+  dt.setDate(dt.getDate() + deltaDays);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function isSameLocalCalendarDay(ymd: string, when = new Date()): boolean {
+  const yy = when.getFullYear();
+  const mm = String(when.getMonth() + 1).padStart(2, '0');
+  const dd = String(when.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}` === ymd;
+}
+
+/** Habilita CTAs el día de la clase desde 8 h antes del horario de inicio (hora local). */
+function demoLockedSessionActionsEnabled(
+  dateYmd: string,
+  startTime: string | undefined,
+  nowMs: number,
+): boolean {
+  if (!startTime || startTime.length < 5) return false;
+  const [y, mo, d] = dateYmd.split('-').map(Number);
+  const [hh, mm] = startTime.slice(0, 5).split(':').map(Number);
+  const classStartMs = new Date(y, mo - 1, d, hh, mm, 0, 0).getTime();
+  const opensMs = classStartMs - 8 * 60 * 60 * 1000;
+  return nowMs >= opensMs && isSameLocalCalendarDay(dateYmd, new Date(nowMs));
+}
+
 type ClassRow = {
   id: string;
   date: string;
@@ -153,6 +190,12 @@ export default function TeacherCourseEditionPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
+  const [demoNowMs, setDemoNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setDemoNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!user || !editionId) return;
@@ -188,6 +231,33 @@ export default function TeacherCourseEditionPage() {
   const lastSessionForDemo = sorted[sorted.length - 1];
   const firstSessionIdForFlow = sorted[0]?.id;
   const estimatedNextDate = datePlusDaysLocal(7);
+
+  const firstFutureSession = useMemo(
+    () => sorted.find((r) => !isSessionDatePast(r.date)),
+    [sorted],
+  );
+
+  const demoLockedFuturePlaceholders = useMemo(() => {
+    if (!isTeacherDemoCalendarUser(user) || !firstFutureSession) return [];
+    const taken = new Set(sorted.map((s) => s.date));
+    const out: { key: string; date: string; start_time?: string }[] = [];
+    let offset = 7;
+    while (out.length < TEACHER_DEMO_EXTRA_SESSIONS && offset <= 7 * 52) {
+      const candidate = addCalendarDays(firstFutureSession.date, offset);
+      if (!taken.has(candidate)) {
+        taken.add(candidate);
+        out.push({
+          key: `__demo_locked_${out.length}_${candidate}`,
+          date: candidate,
+          start_time: firstFutureSession.start_time,
+        });
+      }
+      offset += 7;
+    }
+    return out;
+  }, [sorted, user, firstFutureSession]);
+
+  const flowSessionForDemoExtras = firstFutureSession ?? sorted[0];
 
   if (loading) {
     return <Skeleton />;
@@ -293,6 +363,80 @@ export default function TeacherCourseEditionPage() {
                   >
                     {pdfLoadingId === row.id ? 'Generando...' : '↓ Descargar lista'}
                   </button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+        {demoLockedFuturePlaceholders.map((demo) => {
+          const actionsOn = demoLockedSessionActionsEnabled(demo.date, demo.start_time, demoNowMs);
+          const flowId = flowSessionForDemoExtras?.id;
+          const locRow = flowSessionForDemoExtras ?? lastSessionForDemo;
+          return (
+            <li key={demo.key} className="atendee-card relative p-5">
+              <div className="flex flex-wrap items-start gap-3 pr-10">
+                <span className="rounded-full bg-[#E2E8F0] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#64748B]">
+                  PRÓXIMA
+                </span>
+                <span className="text-sm font-semibold text-[#8A9BB5]">
+                  {formatShortDate(demo.date)}
+                </span>
+              </div>
+              <p className="mt-3 text-3xl font-black tabular-nums text-[#0D1B4B]">
+                {demo.start_time?.slice(0, 5) ?? '—'} hs
+              </p>
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A9BB5]">
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                {locRow ? locationLine(locRow) : '—'}
+              </p>
+              <div className="mt-4 flex w-full flex-col">
+                <div className="flex flex-wrap items-center gap-2">
+                  {actionsOn && flowId ? (
+                    <Link
+                      href={`/teacher/sessions/${encodeURIComponent(flowId)}`}
+                      className="inline-flex flex-1 items-center justify-center rounded-[12px] bg-[#1B3FD8] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white sm:flex-none sm:min-w-[180px]"
+                    >
+                      TOMAR ASISTENCIA
+                    </Link>
+                  ) : (
+                    <span
+                      className="inline-flex flex-1 cursor-not-allowed items-center justify-center rounded-[12px] bg-[#1B3FD8]/35 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white/90 sm:flex-none sm:min-w-[180px]"
+                      aria-disabled
+                    >
+                      TOMAR ASISTENCIA
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={!actionsOn || pdfLoadingId === demo.key || !flowId}
+                  className={`mt-2 w-full rounded-[12px] border py-2 text-xs font-bold uppercase outline outline-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    actionsOn
+                      ? 'border-[#1B3FD8] text-[#1B3FD8] outline-[#1B3FD8] hover:bg-[#1B3FD8]/5'
+                      : 'border-[#CBD5E1] text-[#94A3B8] outline-[#E2E8F0]'
+                  }`}
+                  onClick={() => {
+                    if (!actionsOn || !flowSessionForDemoExtras) return;
+                    void (async () => {
+                      setPdfLoadingId(demo.key);
+                      try {
+                        await generateAttendancePDF(
+                          flowSessionForDemoExtras,
+                          title,
+                          teacherForPdf,
+                        );
+                      } finally {
+                        setPdfLoadingId(null);
+                      }
+                    })();
+                  }}
+                >
+                  {pdfLoadingId === demo.key ? 'Generando...' : '↓ Descargar lista'}
+                </button>
+                {!actionsOn ? (
+                  <p className="atendee-muted mt-2 text-center text-[10px] font-semibold leading-tight">
+                    Se habilitan desde 8 h antes del inicio, el día de la clase (vista demo).
+                  </p>
                 ) : null}
               </div>
             </li>
