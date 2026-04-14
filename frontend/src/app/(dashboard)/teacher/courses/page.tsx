@@ -258,7 +258,9 @@ export default function TeacherCoursesPage() {
         return (a.start_time || '').localeCompare(b.start_time || '');
       });
 
-    const next = futureSessions.find((s) => !isSessionAttendanceClosedForBanner(s)) ?? null;
+    // Siempre la próxima por fecha (como en el detalle de cursada). Si ya está cerrada,
+    // el CTA pasa a "Ver detalle" — no ocultar el banner entero.
+    const next = futureSessions[0] ?? null;
 
     const byEdition = new Map<
       string,
@@ -319,6 +321,7 @@ export default function TeacherCoursesPage() {
   const sede = (s: SessionRow) => s.location_campus || s.location_classroom || '—';
 
   const nextClassIsToday = nextClass?.date === today;
+  const nextClassAttendanceDone = nextClass ? isSessionAttendanceClosedForBanner(nextClass) : false;
 
   return (
     <div className="space-y-6">
@@ -359,11 +362,24 @@ export default function TeacherCoursesPage() {
                   ? `Hoy a las ${nextClass.start_time?.slice(0, 5) ?? '—'} hs`
                   : `${formatCourseStartDay(nextClass.date)} a las ${nextClass.start_time?.slice(0, 5) ?? '—'} hs`}
               </p>
+              {nextClassAttendanceDone ? (
+                <p className="atendee-muted mt-3 text-xs font-semibold">
+                  La asistencia de esta clase ya fue cerrada. Podés revisar el detalle.
+                </p>
+              ) : null}
               <Link
-                href={`/teacher/sessions/${encodeURIComponent(nextClass.id)}`}
-                className="mt-5 inline-flex w-full items-center justify-center rounded-[14px] bg-[#1B3FD8] py-3.5 text-sm font-black uppercase tracking-widest text-white md:w-auto md:px-8"
+                href={
+                  nextClassAttendanceDone
+                    ? `/teacher/sessions/${encodeURIComponent(nextClass.id)}/detail`
+                    : `/teacher/sessions/${encodeURIComponent(nextClass.id)}`
+                }
+                className={`mt-5 inline-flex w-full items-center justify-center rounded-[14px] py-3.5 text-sm font-black uppercase tracking-widest md:w-auto md:px-8 ${
+                  nextClassAttendanceDone
+                    ? 'border-2 border-[#1B3FD8] bg-white text-[#1B3FD8] hover:bg-[#F8FAFC]'
+                    : 'bg-[#1B3FD8] text-white'
+                }`}
               >
-                Tomar asistencia
+                {nextClassAttendanceDone ? 'Ver detalle' : 'Tomar asistencia'}
               </Link>
             </div>
             <div className="hidden shrink-0 text-[#E2E8F0] sm:block" aria-hidden>
