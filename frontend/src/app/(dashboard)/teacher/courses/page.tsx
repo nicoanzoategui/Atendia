@@ -2,18 +2,19 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  CalendarDays,
-  Clock,
-  MapPin,
-  Users,
-  Wifi,
-  Zap,
-} from 'lucide-react';
+import { MapPin, Users, Wifi } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { generateAttendancePDF } from '@/lib/teacher-attendance-pdf';
+import {
+  formatShortDate,
+  isSessionDatePast,
+  locationLine,
+  teacherDisplayFromUser,
+  todayStrLocal,
+} from '@/lib/teacher-session-display';
 
 type SessionRow = {
   id: string;
@@ -23,6 +24,8 @@ type SessionRow = {
   status?: string;
   learning_proposal_edition_id?: string;
   course_name?: string;
+  name?: string;
+  subject?: string;
   class_display_id?: string;
   location_classroom?: string;
   classroom?: string;
@@ -31,15 +34,6 @@ type SessionRow = {
   learning_proposal?: { name?: string } | { name?: string }[];
   class_session_student?: { count?: number }[] | unknown;
 };
-
-function editionName(s: SessionRow): string {
-  const le = s.learning_proposal_edition;
-  const lp = s.learning_proposal;
-  const en = Array.isArray(le) ? le[0]?.name : le?.name;
-  const pn = Array.isArray(lp) ? lp[0]?.name : lp?.name;
-  const raw = s.course_name || en || pn || 'Curso';
-  return formatCourseDisplayTitle(String(raw));
-}
 
 function rawProposalName(s: SessionRow): string | undefined {
   const lp = s.learning_proposal;
@@ -58,7 +52,7 @@ function rawEditionName(s: SessionRow): string | undefined {
 }
 
 function rawCourseNameField(s: SessionRow): string | undefined {
-  const cn = s.course_name;
+  const cn = s.course_name ?? s.name ?? s.subject;
   if (cn == null) return undefined;
   const t = String(cn).trim();
   return t === '' ? undefined : String(cn);
@@ -115,14 +109,6 @@ function formatCourseStartDay(ymd: string): string {
     .toUpperCase();
 }
 
-function todayStrLocal() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 function displayName(user: { email?: string; external_id?: string } | null): string {
   if (!user?.email) return 'Docente';
   const local = user.email.split('@')[0];
@@ -138,30 +124,8 @@ function profLastNameUpper(user: { email?: string } | null): string {
   return last.toUpperCase();
 }
 
-function formatCountdownMs(ms: number) {
-  const sec = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(sec / 60);
-  const r = sec % 60;
-  return `${m}:${r.toString().padStart(2, '0')}`;
-}
-
-function countdownToClassStart(session: SessionRow, today: string): string {
-  if (session.date !== today || !session.start_time) return '--:--';
-  const [h, m] = session.start_time.slice(0, 5).split(':').map(Number);
-  const [y, mo, d] = session.date.split('-').map(Number);
-  const start = new Date(y, mo - 1, d, h, m, 0, 0);
-  const diff = start.getTime() - Date.now();
-  if (diff <= 0) return '00:00';
-  return formatCountdownMs(diff);
-}
-
 function isCancelledSession(s: SessionRow): boolean {
   return String(s.status ?? '').toLowerCase() === 'cancelled';
-}
-
-function isSessionAttendanceClosedForBanner(s: SessionRow): boolean {
-  const st = String(s.status ?? '').toLowerCase();
-  return st === 'attendance_closed' || st === 'finalized';
 }
 
 function Skeleton() {
@@ -181,14 +145,9 @@ export default function TeacherCoursesPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tick, setTick] = useState(0);
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
 
   const today = useMemo(() => todayStrLocal(), []);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const fetchMergedSessions = useCallback(async (): Promise<SessionRow[]> => {
     const todayList = await apiClient<SessionRow[]>('/sessions/today');
@@ -296,11 +255,7 @@ export default function TeacherCoursesPage() {
     };
   }, [sessions, today]);
 
-  const nextBannerTime = useMemo(() => {
-    if (!nextClass) return '--:--';
-    if (nextClass.date === today) return countdownToClassStart(nextClass, today);
-    return formatCourseStartDay(nextClass.date);
-  }, [nextClass, today, tick]);
+  const teacherForPdf = useMemo(() => teacherDisplayFromUser(user), [user]);
 
   if (loading) {
     return <Skeleton />;
@@ -309,19 +264,9 @@ export default function TeacherCoursesPage() {
     return <p className="text-sm text-red-600">{error}</p>;
   }
 
-  const aula = (s: SessionRow) => {
-    const campus = s.location_campus?.trim();
-    const room = (s.location_classroom || s.classroom)?.trim();
-    if (campus && room) return `${campus} · ${room}`;
-    if (campus) return campus;
-    if (room) return room;
-    return '—';
-  };
-
   const sede = (s: SessionRow) => s.location_campus || s.location_classroom || '—';
 
-  const nextClassIsToday = nextClass?.date === today;
-  const nextClassAttendanceDone = nextClass ? isSessionAttendanceClosedForBanner(nextClass) : false;
+  const nextClassProxima = nextClass ? !isSessionDatePast(nextClass.date) : false;
 
   return (
     <div className="space-y-6">
@@ -340,51 +285,69 @@ export default function TeacherCoursesPage() {
       </header>
 
       {nextClass ? (
-        <section className="atendee-card border-2 border-dashed border-[#BFDBFE] p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EFF6FF] px-3 py-1 text-xs font-black uppercase tracking-wider text-[#1B3FD8]">
-                <Zap className="h-3.5 w-3.5" />
-                {nextClassIsToday
-                  ? `SIGUIENTE CLASE EN ${nextBannerTime}`
-                  : `SIGUIENTE CLASE · ${nextBannerTime}`}
-              </span>
-              <p className="mt-4 text-2xl font-black tracking-tight text-[#0D1B4B]">
-                {editionName(nextClass)}
-              </p>
-              <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#8A9BB5]">
-                <MapPin className="h-4 w-4 shrink-0 text-[#1B3FD8]" />
-                {aula(nextClass)}
-              </p>
-              <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-[#8A9BB5]">
-                <Clock className="h-4 w-4 shrink-0 text-[#1B3FD8]" />
-                {nextClassIsToday
-                  ? `Hoy a las ${nextClass.start_time?.slice(0, 5) ?? '—'} hs`
-                  : `${formatCourseStartDay(nextClass.date)} a las ${nextClass.start_time?.slice(0, 5) ?? '—'} hs`}
-              </p>
-              {nextClassAttendanceDone ? (
-                <p className="atendee-muted mt-3 text-xs font-semibold">
-                  La asistencia de esta clase ya fue cerrada. Podés revisar el detalle.
-                </p>
-              ) : null}
-              <Link
-                href={
-                  nextClassAttendanceDone
-                    ? `/teacher/sessions/${encodeURIComponent(nextClass.id)}/detail`
-                    : `/teacher/sessions/${encodeURIComponent(nextClass.id)}`
-                }
-                className={`mt-5 inline-flex w-full items-center justify-center rounded-[14px] py-3.5 text-sm font-black uppercase tracking-widest md:w-auto md:px-8 ${
-                  nextClassAttendanceDone
-                    ? 'border-2 border-[#1B3FD8] bg-white text-[#1B3FD8] hover:bg-[#F8FAFC]'
-                    : 'bg-[#1B3FD8] text-white'
-                }`}
+        <section
+          className={`atendee-card relative p-5 ${
+            nextClassProxima ? 'ring-2 ring-[#1B3FD8] ring-offset-2 ring-offset-[#EEF2F7]' : ''
+          }`}
+        >
+          <div className="flex flex-wrap items-start gap-3 pr-10">
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                nextClassProxima ? 'bg-[#1B3FD8] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}
+            >
+              {nextClassProxima ? 'PRÓXIMA' : 'CERRADA'}
+            </span>
+            <span className="text-sm font-semibold text-[#8A9BB5]">{formatShortDate(nextClass.date)}</span>
+          </div>
+          <p className="mt-3 text-3xl font-black tabular-nums text-[#0D1B4B]">
+            {nextClass.start_time?.slice(0, 5) ?? '—'} hs
+          </p>
+          <p className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A9BB5]">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            {locationLine(nextClass)}
+          </p>
+          <div className="mt-4 flex w-full flex-col">
+            <div className="flex flex-wrap items-center gap-2">
+              {nextClassProxima ? (
+                <Link
+                  href={`/teacher/sessions/${encodeURIComponent(nextClass.id)}`}
+                  className="inline-flex flex-1 items-center justify-center rounded-[12px] bg-[#1B3FD8] px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white sm:flex-none sm:min-w-[180px]"
+                >
+                  TOMAR ASISTENCIA
+                </Link>
+              ) : (
+                <Link
+                  href={`/teacher/sessions/${encodeURIComponent(nextClass.id)}/detail`}
+                  className="inline-flex flex-1 items-center justify-center rounded-[12px] border-2 border-gray-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#0D1B4B] transition hover:bg-gray-50 sm:flex-none sm:min-w-[160px]"
+                >
+                  VER DETALLE
+                </Link>
+              )}
+            </div>
+            {!isCancelledSession(nextClass) ? (
+              <button
+                type="button"
+                disabled={pdfLoadingId === nextClass.id}
+                className="mt-2 w-full rounded-[12px] border border-[#1B3FD8] py-2 text-xs font-bold uppercase text-[#1B3FD8] outline outline-1 outline-[#1B3FD8] transition hover:bg-[#1B3FD8]/5 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  void (async () => {
+                    setPdfLoadingId(nextClass.id);
+                    try {
+                      await generateAttendancePDF(
+                        nextClass,
+                        courseCardName(nextClass),
+                        teacherForPdf,
+                      );
+                    } finally {
+                      setPdfLoadingId(null);
+                    }
+                  })();
+                }}
               >
-                {nextClassAttendanceDone ? 'Ver detalle' : 'Tomar asistencia'}
-              </Link>
-            </div>
-            <div className="hidden shrink-0 text-[#E2E8F0] sm:block" aria-hidden>
-              <CalendarDays className="h-24 w-24" strokeWidth={1} />
-            </div>
+                {pdfLoadingId === nextClass.id ? 'Generando...' : '↓ Descargar lista'}
+              </button>
+            ) : null}
           </div>
         </section>
       ) : (
