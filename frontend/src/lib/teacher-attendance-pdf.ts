@@ -142,6 +142,8 @@ export async function generateAttendancePDF(
   doc.setFillColor(245, 245, 245);
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.45);
+  const MANUAL_EXTRA_ROWS = 5;
+
   const instrLines = [
     'INSTRUCCIONES PARA COMPLETAR:',
     '· Columna PRESENTE: marcar con ✓ si asistió.',
@@ -149,6 +151,7 @@ export async function generateAttendancePDF(
     '· Columna JUSTIFICADO: marcar con J si corresponde.',
     '· Todos los ausentes deben estar marcados explícitamente.',
     '· El docente debe firmar al pie. No dejar casillas sin marca para evitar alteraciones.',
+    `· Tabla inferior: hasta ${MANUAL_EXTRA_ROWS} alumnos que no figuran en el sistema; completar nombre, DNI, ID y firmar.`,
   ];
   const instrH = 5.2;
   doc.rect(margin, y, contentW, instrLines.length * instrH + 4, 'FD');
@@ -192,20 +195,60 @@ export async function generateAttendancePDF(
 
   const drawHeaderRow = (top: number) => {
     doc.setFillColor(55, 65, 85);
-    doc.setTextColor(255, 255, 255);
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.45);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
     let cx = margin;
     for (const [label, w] of headerLabels) {
       doc.rect(cx, top, w, headerH, 'FD');
-      doc.text(label, cx + 1, top + 5.8);
+      // jsPDF puede volver a color de texto negro al cerrar el path del rect;
+      // sin reafirmar blanco, las etiquetas quedan ilegibles sobre el fondo oscuro.
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      const pad = 1.2;
+      doc.text(label, cx + pad, top + 6, { maxWidth: Math.max(2, w - pad * 2) });
       cx += w;
     }
     doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
     return top + headerH;
+  };
+
+  const drawStudentDataRow = (
+    top: number,
+    rowIndex: number,
+    nm: string,
+    dni: string,
+    ext: string,
+  ) => {
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.35);
+    doc.setFontSize(7.5);
+    doc.setTextColor(0, 0, 0);
+    let cx = margin;
+    doc.rect(cx, top, W.num, rowH, 'S');
+    doc.text(String(rowIndex), cx + 1.5, top + 5.2);
+    cx += W.num;
+    doc.rect(cx, top, W.name, rowH, 'S');
+    doc.text(nm, cx + 1, top + 5.2, { maxWidth: W.name - 2 });
+    cx += W.name;
+    doc.rect(cx, top, W.dni, rowH, 'S');
+    doc.text(dni, cx + 1, top + 5.2, { maxWidth: W.dni - 2 });
+    cx += W.dni;
+    doc.rect(cx, top, W.id, rowH, 'S');
+    doc.text(ext, cx + 1, top + 5.2, { maxWidth: W.id - 2 });
+    cx += W.id;
+    doc.rect(cx, top, W.p, rowH, 'S');
+    cx += W.p;
+    doc.rect(cx, top, W.a, rowH, 'S');
+    cx += W.a;
+    doc.rect(cx, top, W.j, rowH, 'S');
+    cx += W.j;
+    doc.rect(cx, top, W.firma, rowH, 'S');
+    cx += W.firma;
+    doc.rect(cx, top, W.obs, rowH, 'S');
+    return top + rowH;
   };
 
   y = drawHeaderRow(y);
@@ -228,33 +271,37 @@ export async function generateAttendancePDF(
       y = drawHeaderRow(y);
     }
     const { nm, ext, dni } = studentLabel(s, i);
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.35);
-    doc.setFontSize(7.5);
-    let cx = margin;
-    doc.rect(cx, y, W.num, rowH, 'S');
-    doc.text(String(i + 1), cx + 1.5, y + 5.2);
-    cx += W.num;
-    doc.rect(cx, y, W.name, rowH, 'S');
-    doc.text(nm, cx + 1, y + 5.2, { maxWidth: W.name - 2 });
-    cx += W.name;
-    doc.rect(cx, y, W.dni, rowH, 'S');
-    doc.text(dni, cx + 1, y + 5.2, { maxWidth: W.dni - 2 });
-    cx += W.dni;
-    doc.rect(cx, y, W.id, rowH, 'S');
-    doc.text(ext, cx + 1, y + 5.2, { maxWidth: W.id - 2 });
-    cx += W.id;
-    doc.rect(cx, y, W.p, rowH, 'S');
-    cx += W.p;
-    doc.rect(cx, y, W.a, rowH, 'S');
-    cx += W.a;
-    doc.rect(cx, y, W.j, rowH, 'S');
-    cx += W.j;
-    doc.rect(cx, y, W.firma, rowH, 'S');
-    cx += W.firma;
-    doc.rect(cx, y, W.obs, rowH, 'S');
-    y += rowH;
+    y = drawStudentDataRow(y, i + 1, nm, dni, ext);
   });
+
+  const manualBlockH = 6 + headerH + MANUAL_EXTRA_ROWS * rowH + 4;
+  if (y + manualBlockH > pageBottom) {
+    doc.addPage();
+    y = 18;
+  } else {
+    y += 6;
+  }
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text(
+    `Alumnos no incluidos en la lista del sistema (completar a mano, máx. ${MANUAL_EXTRA_ROWS})`,
+    margin,
+    y,
+  );
+  y += 6;
+  y = drawHeaderRow(y);
+
+  const baseNum = list.length;
+  for (let k = 0; k < MANUAL_EXTRA_ROWS; k++) {
+    if (y + rowH > pageBottom) {
+      doc.addPage();
+      y = 18;
+      y = drawHeaderRow(y);
+    }
+    y = drawStudentDataRow(y, baseNum + k + 1, '', '', '');
+  }
 
   y += 8;
   if (y + 22 > pageBottom) {
@@ -263,7 +310,7 @@ export async function generateAttendancePDF(
   }
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Total alumnos: ${list.length}`, margin, y);
+  doc.text(`Total alumnos en sistema: ${list.length} (+ ${MANUAL_EXTRA_ROWS} filas manuales)`, margin, y);
   y += 7;
   doc.text('Firma del docente: ________________', margin, y);
   y += 7;
