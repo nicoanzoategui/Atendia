@@ -275,7 +275,7 @@ export default function TeacherCourseEditionPage() {
                     </Link>
                   )}
                 </div>
-                {String(row.status ?? '').toLowerCase() !== 'cancelled' ? (
+                {proxima && String(row.status ?? '').toLowerCase() !== 'cancelled' ? (
                   <button
                     type="button"
                     disabled={pdfLoadingId === row.id}

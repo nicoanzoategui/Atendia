@@ -325,7 +325,7 @@ export default function TeacherCoursesPage() {
                 </Link>
               )}
             </div>
-            {!isCancelledSession(nextClass) ? (
+            {nextClassProxima && !isCancelledSession(nextClass) ? (
               <button
                 type="button"
                 disabled={pdfLoadingId === nextClass.id}
