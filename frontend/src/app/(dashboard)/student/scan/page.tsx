@@ -6,10 +6,9 @@ import { useCallback, useRef, useState } from 'react';
 import { ChevronLeft, CloudAlert } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { QrScanner } from '@/components/qr/qr-scanner';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 
 type ScanState = 'scanning' | 'success' | 'error' | 'offline';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
 export default function StudentScanPage() {
   const { user } = useAuth();
@@ -27,7 +26,8 @@ export default function StudentScanPage() {
       try {
         const authToken =
           typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        const res = await fetch(`${API_URL}/attendance/qr`, {
+        const base = await getApiBaseUrl();
+        const res = await fetch(`${base}/attendance/qr`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

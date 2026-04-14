@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 import { getAuthToken } from '@/lib/db/indexed-db';
 import { useQrRotation } from '@/lib/hooks/use-qr-rotation';
 import { useRealtimeAttendance } from '@/lib/hooks/use-realtime-attendance';
@@ -249,7 +250,7 @@ export default function TeacherSessionDetailPage() {
         const fd = new FormData();
         fd.append('photo', file);
         fd.append('sessionId', sessionId);
-        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+        const base = await getApiBaseUrl();
         const res = await fetch(`${base}/attendance/analyze-photo`, {
           method: 'POST',
           headers: tokenData?.accessToken

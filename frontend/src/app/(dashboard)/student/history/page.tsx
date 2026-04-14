@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MapPin } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { getAuthToken } from '@/lib/db/indexed-db';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 
 type HistoryApiRecord = {
   id: string;
@@ -116,7 +115,8 @@ export default function StudentHistoryPage() {
       try {
         const tokenData = await getAuthToken();
         const token = tokenData?.accessToken;
-        const res = await fetch(`${API_URL}/attendance/my-history`, {
+        const base = await getApiBaseUrl();
+        const res = await fetch(`${base}/attendance/my-history`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) {

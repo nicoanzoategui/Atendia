@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { dashboardPathForRole } from '@/lib/auth/dashboard-path';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +24,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
+      const base = await getApiBaseUrl();
+      const res = await fetch(`${base}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
