@@ -7,6 +7,7 @@ import { jsPDF } from 'jspdf';
 import { CheckCircle2, ChevronLeft, MapPin, Wifi } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 
 type ClassRow = {
   id: string;
@@ -61,15 +62,38 @@ type SessionStudentRow = {
   student_name?: string | null;
   student_external_id?: string | null;
   student_id?: string | null;
+  student_dni?: string | null;
+  dni?: string | null;
+  national_id?: string | null;
+  document_number?: string | null;
 };
 
 function courseNameForPdf(session: ClassRow, fallbackTitle: string): string {
-  return (
+  const raw =
     rawProposalName(session) ??
     rawEditionName(session) ??
     rawCourseNameField(session) ??
-    fallbackTitle
-  );
+    fallbackTitle;
+  return formatCourseDisplayTitle(String(raw));
+}
+
+function pickStudentDni(s: SessionStudentRow): string {
+  const r = s as Record<string, unknown>;
+  const candidates = [
+    s.student_dni,
+    s.dni,
+    s.national_id,
+    s.document_number,
+    r.studentDni,
+    r.nationalId,
+    r.documentNumber,
+  ];
+  for (const c of candidates) {
+    if (c == null) continue;
+    const t = String(c).trim();
+    if (t !== '') return t;
+  }
+  return '—';
 }
 
 function formatDateDDMMYYYY(isoDate: string): string {
@@ -116,6 +140,10 @@ async function generateAttendancePDF(
   const horario = timeRange(session);
   const aula = session.location_classroom || session.classroom || '—';
   const sede = session.location_campus || '—';
+  const listId =
+    typeof globalThis.crypto !== 'undefined' && 'randomUUID' in globalThis.crypto
+      ? globalThis.crypto.randomUUID()
+      : `L-${Date.now()}`;
 
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
@@ -131,45 +159,78 @@ async function generateAttendancePDF(
     `Aula: ${aula}`,
     `Sede: ${sede}`,
     `Docente: ${teacherLabel}`,
+    `ID de lista (no reutilizar en otro acta): ${listId}`,
   ]) {
     doc.text(line, margin, y);
     y += 5.5;
   }
-  y += 5;
+  y += 4;
 
-  const col = { num: 20, name: 80, id: 40, p: 30, a: 30, j: 35 } as const;
-  const sum = col.num + col.name + col.id + col.p + col.a + col.j;
+  doc.setFillColor(245, 245, 245);
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.45);
+  const instrLines = [
+    'INSTRUCCIONES PARA COMPLETAR:',
+    '· Columna PRESENTE: marcar con ✓ si asistió.',
+    '· Columna AUSENTE: escribir "A" o marcar con X si no asistió (no dejar vacío).',
+    '· Columna JUSTIFICADO: marcar con J si corresponde.',
+    '· Todos los ausentes deben estar marcados explícitamente.',
+    '· El docente debe firmar al pie. No dejar casillas sin marca para evitar alteraciones.',
+  ];
+  const instrH = 5.2;
+  doc.rect(margin, y, contentW, instrLines.length * instrH + 4, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  let iy = y + 5;
+  for (const ln of instrLines) {
+    doc.text(ln, margin + 2, iy);
+    iy += instrH;
+  }
+  y = iy + 4;
+  doc.setFont('helvetica', 'normal');
+
+  const col = { num: 12, name: 52, dni: 24, id: 24, p: 16, a: 16, j: 16, firma: 22, obs: 22 } as const;
+  const sum = col.num + col.name + col.dni + col.id + col.p + col.a + col.j + col.firma + col.obs;
   const scale = contentW / sum;
   const W = {
     num: col.num * scale,
     name: col.name * scale,
+    dni: col.dni * scale,
     id: col.id * scale,
     p: col.p * scale,
     a: col.a * scale,
     j: col.j * scale,
+    firma: col.firma * scale,
+    obs: col.obs * scale,
   };
-  const rowH = 7;
-  const headerH = 8;
+  const rowH = 8;
+  const headerH = 9;
   const headerLabels: [string, number][] = [
     ['N°', W.num],
     ['Nombre', W.name],
-    ['ID', W.id],
+    ['DNI', W.dni],
+    ['ID sistema', W.id],
     ['Presente', W.p],
     ['Ausente', W.a],
-    ['Justificado', W.j],
+    ['Justif.', W.j],
+    ['Firma', W.firma],
+    ['Obs.', W.obs],
   ];
 
   const drawHeaderRow = (top: number) => {
-    doc.setFillColor(230, 235, 245);
-    doc.setDrawColor(40, 40, 40);
+    doc.setFillColor(55, 65, 85);
+    doc.setTextColor(255, 255, 255);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.45);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7);
     let cx = margin;
     for (const [label, w] of headerLabels) {
       doc.rect(cx, top, w, headerH, 'FD');
-      doc.text(label, cx + 1, top + 5.2);
+      doc.text(label, cx + 1, top + 5.8);
       cx += w;
     }
+    doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
     return top + headerH;
   };
@@ -184,7 +245,7 @@ async function generateAttendancePDF(
         : ext
           ? `Alumno ${ext}`
           : `Alumno ${i + 1}`;
-    return { nm, ext: ext || '—' };
+    return { nm, ext: ext || '—', dni: pickStudentDni(s) };
   };
 
   list.forEach((s, i) => {
@@ -193,24 +254,32 @@ async function generateAttendancePDF(
       y = 18;
       y = drawHeaderRow(y);
     }
-    const { nm, ext } = studentLabel(s, i);
-    doc.setDrawColor(60, 60, 60);
-    doc.setFontSize(8);
+    const { nm, ext, dni } = studentLabel(s, i);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.35);
+    doc.setFontSize(7.5);
     let cx = margin;
     doc.rect(cx, y, W.num, rowH, 'S');
-    doc.text(String(i + 1), cx + 1.5, y + 4.8);
+    doc.text(String(i + 1), cx + 1.5, y + 5.2);
     cx += W.num;
     doc.rect(cx, y, W.name, rowH, 'S');
-    doc.text(nm, cx + 1, y + 4.8, { maxWidth: W.name - 2 });
+    doc.text(nm, cx + 1, y + 5.2, { maxWidth: W.name - 2 });
     cx += W.name;
+    doc.rect(cx, y, W.dni, rowH, 'S');
+    doc.text(dni, cx + 1, y + 5.2, { maxWidth: W.dni - 2 });
+    cx += W.dni;
     doc.rect(cx, y, W.id, rowH, 'S');
-    doc.text(ext, cx + 1, y + 4.8, { maxWidth: W.id - 2 });
+    doc.text(ext, cx + 1, y + 5.2, { maxWidth: W.id - 2 });
     cx += W.id;
     doc.rect(cx, y, W.p, rowH, 'S');
     cx += W.p;
     doc.rect(cx, y, W.a, rowH, 'S');
     cx += W.a;
     doc.rect(cx, y, W.j, rowH, 'S');
+    cx += W.j;
+    doc.rect(cx, y, W.firma, rowH, 'S');
+    cx += W.firma;
+    doc.rect(cx, y, W.obs, rowH, 'S');
     y += rowH;
   });
 
@@ -232,7 +301,7 @@ async function generateAttendancePDF(
     hour: '2-digit',
     minute: '2-digit',
   });
-  doc.text(`Generado por Atendee · ${genAt}`, margin, y);
+  doc.text(`Generado por Atendee · ${genAt} · Lista ${listId}`, margin, y);
 
   doc.save(`lista-asistencia-${session.date}.pdf`);
 }
@@ -255,12 +324,12 @@ function coursePageTitle(rows: ClassRow[]): string {
     if (!t || isUnusableCourseTitle(t)) return undefined;
     return v;
   };
-  return (
+  const raw =
     pick(rawProposalName(s)) ??
     pick(rawEditionName(s)) ??
     pick(rawCourseNameField(s)) ??
-    'Curso sin nombre'
-  );
+    'Curso sin nombre';
+  return formatCourseDisplayTitle(raw);
 }
 
 function normalizeTeachers(raw: ClassRow['class_session_teacher']): ClassSessionTeacherRow[] {
@@ -471,7 +540,7 @@ export default function TeacherCourseEditionPage() {
                     </Link>
                   )}
                 </div>
-                {row.status !== 'cancelled' ? (
+                {String(row.status ?? '').toLowerCase() !== 'cancelled' ? (
                   <button
                     type="button"
                     disabled={pdfLoadingId === row.id}

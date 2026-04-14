@@ -6,6 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronLeft, MapPin } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { formatCourseDisplayTitle } from '@/lib/course-display-name';
+import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { studentAttendanceIsRegistered } from '@/lib/student-attendance';
 
 type SessionRow = {
   id: string;
@@ -135,7 +138,8 @@ export default function StudentCourseEditionPage() {
       if (c !== 0) return c;
       return (a.start_time || '').localeCompare(b.start_time || '');
     });
-    setSessions(merged);
+    const deduped = merged.filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
+    setSessions(deduped);
   }, [editionId]);
 
   useEffect(() => {
@@ -155,12 +159,16 @@ export default function StudentCourseEditionPage() {
     };
   }, [user, editionId, load]);
 
-  const title = useMemo(() => courseTitleFromSessions(sessions), [sessions]);
+  useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
+
+  const title = useMemo(() => formatCourseDisplayTitle(courseTitleFromSessions(sessions)), [sessions]);
   const estimatedDate = useMemo(() => addDaysToYmd(today, 7), [today]);
   const showEstimatedCard = useMemo(() => allSessionsPast(sessions, today), [sessions, today]);
 
   const nearestUpcomingSessionId = useMemo(() => {
-    const upcoming = sessions.filter((s) => s.date >= today);
+    const upcoming = sessions.filter(
+      (s) => s.date >= today && !studentAttendanceIsRegistered(s.my_attendance?.status),
+    );
     if (upcoming.length === 0) return null;
     upcoming.sort((a, b) => {
       const c = a.date.localeCompare(b.date);
@@ -263,6 +271,9 @@ export default function StudentCourseEditionPage() {
                 <p className="mt-3 text-2xl font-black text-[#0D1B4B]">
                   {sessionTimeLabel(s.start_time)}
                 </p>
+                <p className="mt-1 text-sm font-bold leading-snug text-[#0D1B4B]">
+                  {title} · {formatDayMonth(s.date)} · {sessionTimeLabel(s.start_time)}
+                </p>
                 <p className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-[#8A9BB5]">
                   <MapPin className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
                   {loc}
@@ -277,7 +288,11 @@ export default function StudentCourseEditionPage() {
                 ) : null}
 
                 {upcoming ? (
-                  isNearestUpcoming ? (
+                  studentAttendanceIsRegistered(s.my_attendance?.status) ? (
+                    <p className="mt-3 rounded-[12px] bg-[#F0FDF4] py-3 text-center text-xs font-bold uppercase text-[#166534]">
+                      Asistencia registrada
+                    </p>
+                  ) : isNearestUpcoming ? (
                     <Link
                       href="/student/scan"
                       className="mt-3 flex w-full items-center justify-center rounded-[12px] bg-[#1B3FD8] py-3 text-center text-sm font-bold uppercase text-white"

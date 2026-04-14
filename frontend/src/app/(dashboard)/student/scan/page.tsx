@@ -7,6 +7,7 @@ import { ChevronLeft, CloudAlert } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { QrScanner } from '@/components/qr/qr-scanner';
 import { getApiBaseUrl } from '@/lib/api/base-url';
+import { requestDashboardRefetch } from '@/lib/dashboard-refetch';
 
 type ScanState = 'scanning' | 'success' | 'error' | 'offline';
 
@@ -41,6 +42,7 @@ export default function StudentScanPage() {
         }
         setSuccessRegisteredAt(new Date());
         setScanState('success');
+        requestDashboardRefetch();
       } catch (err) {
         if (!navigator.onLine) {
           try {

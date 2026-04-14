@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { formatCourseDisplayTitle } from '@/lib/course-display-name';
+import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { studentAttendanceIsRegistered } from '@/lib/student-attendance';
 
 type MyCourseResponse = {
   edition: {
@@ -124,6 +127,7 @@ function pickNextSession(sessions: EditionSession[], today: string): EditionSess
   const usable = sessions.filter((s) => !isCancelled(s));
   const upcoming = usable
     .filter((s) => s.date >= today)
+    .filter((s) => !studentAttendanceIsRegistered(s.my_attendance?.status))
     .sort((a, b) => {
       const c = a.date.localeCompare(b.date);
       if (c !== 0) return c;
@@ -188,6 +192,8 @@ export default function StudentCoursePage() {
     };
   }, [user, load]);
 
+  useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
+
   const courseMeta = useMemo(() => {
     if (!myCourse?.edition) return null;
     return buildCourseMeta(myCourse.edition, editionSessions.length ? editionSessions : (myCourse.sessions ?? []));
@@ -198,9 +204,10 @@ export default function StudentCoursePage() {
     [editionSessions, myCourse, today],
   );
 
-  useEffect(() => {
-    console.log('nextClass:', nextClass);
-  }, [nextClass]);
+  const hasAnyUpcomingSession = useMemo(() => {
+    const list = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+    return list.some((s) => !isCancelled(s) && s.date >= today);
+  }, [editionSessions, myCourse, today]);
 
   const nextLocLine = useMemo(() => {
     if (!nextClass) return '';
@@ -256,7 +263,7 @@ export default function StudentCoursePage() {
     );
   }
 
-  const displayCourseTitle = courseMeta.name;
+  const displayCourseTitle = formatCourseDisplayTitle(courseMeta.name);
 
   return (
     <div className="min-h-screen bg-[#EEF2F7] px-4 py-6 pb-24">
@@ -304,6 +311,11 @@ export default function StudentCoursePage() {
               CONFIRMAR ASISTENCIA
               <ChevronRight className="ml-1 h-4 w-4" strokeWidth={2.5} />
             </Link>
+          </section>
+        ) : hasAnyUpcomingSession ? (
+          <section className="mt-6 rounded-[20px] border border-[#DCFCE7] bg-[#F0FDF4] p-5 text-center text-sm font-semibold text-[#166534]">
+            Ya registramos tu asistencia para la próxima clase programada. Podés revisar el detalle en &quot;Ver
+            clases&quot;.
           </section>
         ) : (
           <section className="mt-6 rounded-[20px] bg-white p-5 text-center text-sm text-[#8A9BB5]">

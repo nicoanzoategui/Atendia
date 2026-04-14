@@ -21,6 +21,7 @@ import {
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { getApiBaseUrl } from '@/lib/api/base-url';
+import { requestDashboardRefetch } from '@/lib/dashboard-refetch';
 import { getAuthToken } from '@/lib/db/indexed-db';
 import { useQrRotation } from '@/lib/hooks/use-qr-rotation';
 import { useRealtimeAttendance } from '@/lib/hooks/use-realtime-attendance';
@@ -243,6 +244,15 @@ export default function TeacherSessionDetailPage() {
 
   const analyzeAttendancePhoto = useCallback(
     async (file: File) => {
+      if (typeof window !== 'undefined') {
+        const k = `atendee-hoja-saved-${sessionId}`;
+        if (sessionStorage.getItem(k)) {
+          const ok = window.confirm(
+            'Ya registraste asistencia con lista en papel en esta clase. ¿Analizar otra foto y guardar de nuevo?',
+          );
+          if (!ok) return;
+        }
+      }
       setPhotoAnalyzing(true);
       setError(null);
       try {
@@ -612,12 +622,14 @@ export default function TeacherSessionDetailPage() {
         <div className="mt-10 flex w-full max-w-sm flex-col gap-3">
           <Link
             href={`/teacher/sessions/${encodeURIComponent(sessionId)}/detail`}
+            onClick={() => requestDashboardRefetch()}
             className="inline-flex w-full items-center justify-center rounded-[14px] border-2 border-gray-200 bg-white px-4 py-3.5 text-xs font-black uppercase tracking-widest text-[#0D1B4B] transition hover:bg-gray-50"
           >
             VER DETALLE
           </Link>
           <Link
             href="/teacher/courses"
+            onClick={() => requestDashboardRefetch()}
             className="inline-flex w-full items-center justify-center rounded-[14px] bg-[#1B3FD8] px-4 py-3.5 text-xs font-black uppercase tracking-widest text-white transition hover:opacity-95"
           >
             VOLVER A MIS CLASES
@@ -964,6 +976,7 @@ export default function TeacherSessionDetailPage() {
                       const ok = await patchAction('/close');
                       if (ok) {
                         setFinalizeModalOpen(false);
+                        requestDashboardRefetch();
                         setFinalizedScreen({ source: 'qr', scannedCount: countSnapshot });
                       }
                     }}
@@ -1129,6 +1142,12 @@ export default function TeacherSessionDetailPage() {
                 </ul>
               </div>
 
+              <p className="rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-relaxed text-amber-950">
+                Los alumnos ausentes deben quedar explícitamente marcados (no dejes casillas vacías: usá{' '}
+                <span className="font-black">A</span> o <span className="font-black">X</span> en ausente, o
+                corregí con los botones P / A / J cuando la confianza del análisis es baja).
+              </p>
+
               <button
                 type="button"
                 disabled={photoSaving}
@@ -1152,6 +1171,12 @@ export default function TeacherSessionDetailPage() {
                       const ui = st === 'excused' ? 'excused' : st === 'present' ? 'present' : 'absent';
                       await postAttendance(s, ui);
                     }
+                    try {
+                      sessionStorage.setItem(`atendee-hoja-saved-${sessionId}`, String(Date.now()));
+                    } catch {
+                      /* ignore */
+                    }
+                    requestDashboardRefetch();
                     setFinalizedScreen({ source: 'manual', markedCount: photoResults.length });
                     setPhotoFile(null);
                     setPhotoResults([]);
@@ -1337,6 +1362,7 @@ export default function TeacherSessionDetailPage() {
                       const ok = await patchAction('/close');
                       if (ok) {
                         setManualCloseModalOpen(false);
+                        requestDashboardRefetch();
                         setFinalizedScreen({ source: 'manual', markedCount: countSnapshot });
                       }
                     }}

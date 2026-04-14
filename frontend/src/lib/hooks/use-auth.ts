@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getAuthToken, setAuthToken, clearAuthToken, AuthToken } from '../db/indexed-db';
+import { resetApiBaseUrlCache } from '../api/base-url';
 
 export function useAuth() {
   const [user, setUser] = useState<AuthToken['user'] | null>(null);
@@ -32,6 +33,7 @@ export function useAuth() {
   };
 
   const logout = async () => {
+    resetApiBaseUrlCache();
     await clearAuthToken();
     setUser(null);
   };

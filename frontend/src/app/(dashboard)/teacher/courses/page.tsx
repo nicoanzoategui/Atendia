@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
   Clock,
@@ -12,12 +12,15 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import { formatCourseDisplayTitle } from '@/lib/course-display-name';
+import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
 
 type SessionRow = {
   id: string;
   date: string;
   start_time?: string;
   end_time?: string;
+  status?: string;
   learning_proposal_edition_id?: string;
   course_name?: string;
   class_display_id?: string;
@@ -34,7 +37,8 @@ function editionName(s: SessionRow): string {
   const lp = s.learning_proposal;
   const en = Array.isArray(le) ? le[0]?.name : le?.name;
   const pn = Array.isArray(lp) ? lp[0]?.name : lp?.name;
-  return s.course_name || en || pn || 'Curso';
+  const raw = s.course_name || en || pn || 'Curso';
+  return formatCourseDisplayTitle(String(raw));
 }
 
 function rawProposalName(s: SessionRow): string | undefined {
@@ -82,7 +86,7 @@ function courseCardName(s: SessionRow): string {
   };
   const courseName =
     pick(proposal_name) ?? pick(edition_name) ?? pick(name) ?? 'Curso sin nombre';
-  return courseName;
+  return formatCourseDisplayTitle(courseName);
 }
 
 function rosterCount(s: SessionRow): number {
@@ -152,7 +156,12 @@ function countdownToClassStart(session: SessionRow, today: string): string {
 }
 
 function isCancelledSession(s: SessionRow): boolean {
-  return String((s as { status?: string }).status ?? '').toLowerCase() === 'cancelled';
+  return String(s.status ?? '').toLowerCase() === 'cancelled';
+}
+
+function isSessionAttendanceClosedForBanner(s: SessionRow): boolean {
+  const st = String(s.status ?? '').toLowerCase();
+  return st === 'attendance_closed' || st === 'finalized';
 }
 
 function Skeleton() {
@@ -181,39 +190,44 @@ export default function TeacherCoursesPage() {
     return () => clearInterval(id);
   }, []);
 
+  const fetchMergedSessions = useCallback(async (): Promise<SessionRow[]> => {
+    const todayList = await apiClient<SessionRow[]>('/sessions/today');
+    const editionIds = new Set<string>();
+    for (const s of todayList ?? []) {
+      if (s.learning_proposal_edition_id) editionIds.add(s.learning_proposal_edition_id);
+    }
+    const byId = new Map<string, SessionRow>();
+    await Promise.all(
+      [...editionIds].map(async (eid) => {
+        try {
+          const rows = await apiClient<SessionRow[]>(
+            `/sessions/edition/${encodeURIComponent(eid)}`,
+          );
+          for (const s of rows ?? []) {
+            if (s.id) byId.set(s.id, s);
+          }
+        } catch {
+          /* sin acceso a esa cursada */
+        }
+      }),
+    );
+    for (const s of todayList ?? []) {
+      if (s.id) byId.set(s.id, { ...byId.get(s.id), ...s });
+    }
+    return [...byId.values()];
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       try {
-        const todayList = await apiClient<SessionRow[]>('/sessions/today');
-
-        const editionIds = new Set<string>();
-        for (const s of todayList ?? []) {
-          if (s.learning_proposal_edition_id) editionIds.add(s.learning_proposal_edition_id);
+        setLoading(true);
+        const merged = await fetchMergedSessions();
+        if (!cancelled) {
+          setSessions(merged);
+          setError(null);
         }
-
-        const byId = new Map<string, SessionRow>();
-        await Promise.all(
-          [...editionIds].map(async (eid) => {
-            try {
-              const rows = await apiClient<SessionRow[]>(
-                `/sessions/edition/${encodeURIComponent(eid)}`,
-              );
-              for (const s of rows ?? []) {
-                if (s.id) byId.set(s.id, s);
-              }
-            } catch {
-              /* sin acceso a esa cursada */
-            }
-          }),
-        );
-
-        for (const s of todayList ?? []) {
-          if (s.id) byId.set(s.id, { ...byId.get(s.id), ...s });
-        }
-
-        if (!cancelled) setSessions([...byId.values()]);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Error al cargar');
       } finally {
@@ -223,7 +237,16 @@ export default function TeacherCoursesPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, fetchMergedSessions]);
+
+  useEffect(() => {
+    if (!user) return () => {};
+    return subscribeDashboardRefetch(() => {
+      void fetchMergedSessions()
+        .then((merged) => setSessions(merged))
+        .catch(() => {});
+    });
+  }, [user, fetchMergedSessions]);
 
   const { nextClass, courseCards } = useMemo(() => {
     const futureSessions = sessions
@@ -235,7 +258,7 @@ export default function TeacherCoursesPage() {
         return (a.start_time || '').localeCompare(b.start_time || '');
       });
 
-    const next = futureSessions[0] ?? null;
+    const next = futureSessions.find((s) => !isSessionAttendanceClosedForBanner(s)) ?? null;
 
     const byEdition = new Map<
       string,
