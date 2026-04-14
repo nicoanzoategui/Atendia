@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
-import { studentAttendanceIsRegistered } from '@/lib/student-attendance';
+import { studentAttendanceShowsRegistered } from '@/lib/student-attendance';
 
 type SessionRow = {
   id: string;
@@ -21,7 +21,7 @@ type SessionRow = {
   classroom?: string;
   learning_proposal?: { name?: string } | { name?: string }[];
   learning_proposal_edition?: { name?: string } | { name?: string }[];
-  my_attendance?: { status?: string } | null;
+  my_attendance?: { status?: string; method?: string | null } | null;
 };
 
 type MyCourseResponse = {
@@ -167,7 +167,7 @@ export default function StudentCourseEditionPage() {
 
   const nearestUpcomingSessionId = useMemo(() => {
     const upcoming = sessions.filter(
-      (s) => s.date >= today && !studentAttendanceIsRegistered(s.my_attendance?.status),
+      (s) => s.date >= today && !studentAttendanceShowsRegistered(s.my_attendance, s.date, today),
     );
     if (upcoming.length === 0) return null;
     upcoming.sort((a, b) => {
@@ -288,7 +288,7 @@ export default function StudentCourseEditionPage() {
                 ) : null}
 
                 {upcoming ? (
-                  studentAttendanceIsRegistered(s.my_attendance?.status) ? (
+                  studentAttendanceShowsRegistered(s.my_attendance, s.date, today) ? (
                     <p className="mt-3 rounded-[12px] bg-[#F0FDF4] py-3 text-center text-xs font-bold uppercase text-[#166534]">
                       Asistencia registrada
                     </p>

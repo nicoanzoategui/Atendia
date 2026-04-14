@@ -14,7 +14,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
-import { studentAttendanceIsRegistered } from '@/lib/student-attendance';
+import { studentAttendanceShowsRegistered } from '@/lib/student-attendance';
 
 type MyCourseResponse = {
   edition: {
@@ -36,7 +36,7 @@ type EditionSession = {
   location_building?: string;
   location_classroom?: string;
   classroom?: string;
-  my_attendance?: { status?: string } | null;
+  my_attendance?: { status?: string; method?: string | null } | null;
 };
 
 type CourseMeta = {
@@ -127,7 +127,7 @@ function pickNextSession(sessions: EditionSession[], today: string): EditionSess
   const usable = sessions.filter((s) => !isCancelled(s));
   const upcoming = usable
     .filter((s) => s.date >= today)
-    .filter((s) => !studentAttendanceIsRegistered(s.my_attendance?.status))
+    .filter((s) => !studentAttendanceShowsRegistered(s.my_attendance, s.date, today))
     .sort((a, b) => {
       const c = a.date.localeCompare(b.date);
       if (c !== 0) return c;

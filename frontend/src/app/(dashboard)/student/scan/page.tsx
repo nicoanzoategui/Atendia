@@ -17,6 +17,7 @@ export default function StudentScanPage() {
   const [scanState, setScanState] = useState<ScanState>('scanning');
   const [errorMsg, setErrorMsg] = useState('');
   const [successRegisteredAt, setSuccessRegisteredAt] = useState<Date | null>(null);
+  const [scannerKey, setScannerKey] = useState(0);
   const busyRef = useRef(false);
 
   const handleScan = useCallback(
@@ -91,9 +92,13 @@ export default function StudentScanPage() {
               </p>
             </div>
           </div>
-          <QrScanner onScan={handleScan} onClose={() => router.push('/student/course')} />
+          <QrScanner
+            key={scannerKey}
+            onScan={handleScan}
+            onClose={() => router.push('/student/course')}
+          />
           <p className="pointer-events-none fixed bottom-28 left-0 right-0 z-[60] px-6 text-center text-xs text-white drop-shadow-md">
-            Apuntá la cámara al QR que muestra tu docente
+            Escaneo en vivo: apuntá al QR del docente (no hace falta capturar una foto).
           </p>
         </>
       ) : (
@@ -163,6 +168,7 @@ export default function StudentScanPage() {
                   onClick={() => {
                     setErrorMsg('');
                     setScanState('scanning');
+                    setScannerKey((k) => k + 1);
                   }}
                   className="mt-8 w-full rounded-[12px] bg-[#0D1B4B] py-3 text-sm font-bold uppercase text-white"
                 >

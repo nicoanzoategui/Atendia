@@ -9,6 +9,9 @@ interface QrScannerProps {
   onClose: () => void;
 }
 
+/** Tokens del backend son base64 JSON; evita disparar con ruido corto del sensor. */
+const MIN_QR_TOKEN_LENGTH = 24;
+
 function isPermissionDeniedError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { name?: string; message?: string };
@@ -38,77 +41,98 @@ function mapCameraStartError(err: unknown): string {
 export function QrScanner({ onScan, onClose }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
+  const handledRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    handledRef.current = false;
     const codeReader = new BrowserQRCodeReader();
+    let cancelled = false;
 
     async function startScanner() {
       try {
-        if (videoRef.current) {
-          const controls = await codeReader.decodeFromVideoDevice(
-            undefined, // use default device
-            videoRef.current,
-            (result, err) => {
-              if (result) {
-                onScan(result.getText());
-              }
+        if (!videoRef.current) return;
+        const ctrls = await codeReader.decodeFromVideoDevice(
+          undefined,
+          videoRef.current,
+          (result) => {
+            if (cancelled || handledRef.current || !result) return;
+            const text = result.getText().trim();
+            if (text.length < MIN_QR_TOKEN_LENGTH) return;
+            handledRef.current = true;
+            try {
+              ctrls.stop();
+            } catch {
+              /* ignore */
             }
-          );
-          controlsRef.current = controls;
-        }
+            controlsRef.current = null;
+            onScan(text);
+          },
+        );
+        controlsRef.current = ctrls;
       } catch (err) {
         if (!isPermissionDeniedError(err)) {
           console.warn('[QrScanner]', err);
         }
-        setError(mapCameraStartError(err));
+        if (!cancelled) setError(mapCameraStartError(err));
       }
     }
 
-    startScanner();
+    void startScanner();
 
     return () => {
+      cancelled = true;
+      handledRef.current = true;
       if (controlsRef.current) {
-        controlsRef.current.stop();
+        try {
+          controlsRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+        controlsRef.current = null;
       }
     };
   }, [onScan]);
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      <div className="flex justify-between items-center p-6 text-white bg-black/50 absolute top-0 w-full z-10">
-        <h2 className="font-bold flex items-center gap-2">
-          <Camera className="w-5 h-5" />
-          Escanea el QR
+    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+      <div className="absolute top-0 z-10 flex w-full items-center justify-between bg-black/50 p-6 text-white">
+        <h2 className="flex items-center gap-2 font-bold">
+          <Camera className="h-5 w-5" />
+          Escaneo en vivo
         </h2>
-        <button onClick={onClose}>
-          <X className="w-6 h-6" />
+        <button type="button" onClick={onClose} aria-label="Cerrar escáner">
+          <X className="h-6 w-6" />
         </button>
       </div>
 
-      <div className="flex-1 flex items-center justify-center relative bg-black">
+      <div className="relative flex flex-1 items-center justify-center bg-black">
         {error ? (
-          <div className="text-white text-center p-6">
+          <div className="p-6 text-center text-white">
             <p>{error}</p>
-            <button onClick={onClose} className="mt-4 px-6 py-2 bg-white text-black rounded-lg">Cerrar</button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-4 rounded-lg bg-white px-6 py-2 text-black"
+            >
+              Cerrar
+            </button>
           </div>
         ) : (
-          <video 
-            ref={videoRef} 
-            className="w-full h-screen object-cover"
-          />
+          <video ref={videoRef} className="h-screen w-full object-cover" playsInline muted />
         )}
-        
-        {/* Scanner Overlay UI */}
-        <div className="absolute inset-0 border-[3px] border-white/20 pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border-2 border-white rounded-3xl shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
-            <div className="absolute inset-0 animate-pulse border-2 border-white/50 rounded-3xl" />
+
+        <div className="pointer-events-none absolute inset-0 border-[3px] border-white/20">
+          <div className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-3xl border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
+            <div className="absolute inset-0 animate-pulse rounded-3xl border-2 border-white/50" />
           </div>
         </div>
       </div>
-      
-      <div className="p-10 bg-black text-white text-center pb-20">
-        <p className="text-sm opacity-70 italic tracking-wide">Apunta al QR del docente para marcar tu asistencia</p>
+
+      <div className="bg-black p-10 pb-20 text-center text-white">
+        <p className="text-sm font-semibold tracking-wide text-white/90">
+          Apuntá el QR dentro del recuadro: la cámara lee en vivo, no hace falta sacar una foto.
+        </p>
       </div>
     </div>
   );
