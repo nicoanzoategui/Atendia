@@ -8,7 +8,10 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
-import { studentAttendanceShowsRegistered } from '@/lib/student-attendance';
+import {
+  studentSessionNeedsQrScanFlow,
+  studentUpcomingQrPresenceConfirmed,
+} from '@/lib/student-attendance';
 
 type SessionRow = {
   id: string;
@@ -167,7 +170,7 @@ export default function StudentCourseEditionPage() {
 
   const nearestUpcomingSessionId = useMemo(() => {
     const upcoming = sessions.filter(
-      (s) => s.date >= today && !studentAttendanceShowsRegistered(s.my_attendance, s.date, today),
+      (s) => s.date >= today && studentSessionNeedsQrScanFlow(s.my_attendance, s.date, today),
     );
     if (upcoming.length === 0) return null;
     upcoming.sort((a, b) => {
@@ -288,7 +291,7 @@ export default function StudentCourseEditionPage() {
                 ) : null}
 
                 {upcoming ? (
-                  studentAttendanceShowsRegistered(s.my_attendance, s.date, today) ? (
+                  studentUpcomingQrPresenceConfirmed(s.my_attendance, s.date, today) ? (
                     <p className="mt-3 rounded-[12px] bg-[#F0FDF4] py-3 text-center text-xs font-bold uppercase text-[#166534]">
                       Asistencia registrada
                     </p>

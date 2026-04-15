@@ -3,32 +3,54 @@ export type StudentMyAttendance = {
   method?: string | null;
 } | null | undefined;
 
-const TERMINAL_STATUSES = ['present', 'late', 'absent', 'justified', 'excused'] as const;
+function normStatus(attendance: StudentMyAttendance): string {
+  return String(attendance?.status ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function normMethod(attendance: StudentMyAttendance): string {
+  return String(attendance?.method ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+const NEGATIVE = ['absent', 'excused', 'justified'] as const;
+const POSITIVE = ['present', 'late'] as const;
 
 /**
- * Si la UI debe mostrar la sesión como "asistencia ya registrada" para el alumno.
- * - Sesiones pasadas: cualquier estado terminal cuenta.
- * - Hoy o futuro: ausencias / justificados cuentan; **presente/tarde solo si method === 'qr'**
- *   (evita mostrar "ya registramos" al loguear con datos seed o carga manual del docente).
+ * Próxima sesión en la que el alumno aún debe (o puede) usar el flujo de QR:
+ * - Futuro: siempre true salvo ausencia/justificado marcado por docente.
+ * - Hoy con presente/tarde y method qr: ya escaneó → false.
+ * - Hoy con presente/tarde sin qr (admin/seed): true.
  */
-export function studentAttendanceShowsRegistered(
+export function studentSessionNeedsQrScanFlow(
   attendance: StudentMyAttendance | undefined,
   sessionDate: string,
   todayYmd: string,
 ): boolean {
-  const status = attendance?.status;
-  if (status == null || String(status).trim() === '') return false;
-  const x = String(status).toLowerCase().trim();
-  if (!(TERMINAL_STATUSES as readonly string[]).includes(x)) return false;
-
-  if (sessionDate < todayYmd) {
-    return true;
+  if (sessionDate < todayYmd) return false;
+  const st = normStatus(attendance);
+  if ((NEGATIVE as readonly string[]).includes(st)) return false;
+  if ((POSITIVE as readonly string[]).includes(st)) {
+    if (normMethod(attendance) !== 'qr') return true;
+    // presente por QR: solo damos el flujo por cerrado el **día** de esa clase (no días antes).
+    return sessionDate > todayYmd;
   }
-
-  if (x === 'present' || x === 'late') {
-    const m = String(attendance?.method ?? '').toLowerCase().trim();
-    return m === 'qr';
-  }
-
   return true;
+}
+
+/**
+ * Mensaje verde "asistencia por QR": solo el día de la clase (o después) y con registro QR.
+ * Nunca en fechas futuras aunque el backend devuelva present+qr (seed).
+ */
+export function studentUpcomingQrPresenceConfirmed(
+  attendance: StudentMyAttendance | undefined,
+  sessionDate: string,
+  todayYmd: string,
+): boolean {
+  if (sessionDate > todayYmd) return false;
+  const st = normStatus(attendance);
+  if (!(POSITIVE as readonly string[]).includes(st)) return false;
+  return normMethod(attendance) === 'qr';
 }

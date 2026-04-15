@@ -14,7 +14,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
-import { studentAttendanceShowsRegistered } from '@/lib/student-attendance';
+import { studentSessionNeedsQrScanFlow } from '@/lib/student-attendance';
 
 type MyCourseResponse = {
   edition: {
@@ -127,7 +127,7 @@ function pickNextSession(sessions: EditionSession[], today: string): EditionSess
   const usable = sessions.filter((s) => !isCancelled(s));
   const upcoming = usable
     .filter((s) => s.date >= today)
-    .filter((s) => !studentAttendanceShowsRegistered(s.my_attendance, s.date, today))
+    .filter((s) => studentSessionNeedsQrScanFlow(s.my_attendance, s.date, today))
     .sort((a, b) => {
       const c = a.date.localeCompare(b.date);
       if (c !== 0) return c;
@@ -313,9 +313,10 @@ export default function StudentCoursePage() {
             </Link>
           </section>
         ) : hasAnyUpcomingSession ? (
-          <section className="mt-6 rounded-[20px] border border-[#DCFCE7] bg-[#F0FDF4] p-5 text-center text-sm font-semibold text-[#166534]">
-            Ya registramos tu asistencia para la próxima clase programada. Podés revisar el detalle en &quot;Ver
-            clases&quot;.
+          <section className="mt-6 rounded-[20px] border border-[#E2E8F0] bg-white p-5 text-center text-sm font-semibold text-[#64748B]">
+            Tenés clases próximas. El día de cada clase, registrá tu asistencia con el QR del docente desde{' '}
+            <span className="font-bold text-[#0D1B4B]">Escanear</span>. En &quot;Ver clases&quot; podés ver el
+            calendario.
           </section>
         ) : (
           <section className="mt-6 rounded-[20px] bg-white p-5 text-center text-sm text-[#8A9BB5]">
