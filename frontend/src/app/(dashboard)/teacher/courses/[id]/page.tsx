@@ -9,27 +9,15 @@ import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { generateAttendancePDF } from '@/lib/teacher-attendance-pdf';
 import {
+  buildDemoEditionFuturePlaceholders,
+  isDemoCalendarAccount,
+} from '@/lib/demo-edition-calendar-extras';
+import {
   formatShortDate,
   isSessionDatePast,
   locationLine,
   teacherDisplayFromUser,
 } from '@/lib/teacher-session-display';
-
-const TEACHER_DEMO_EXTRA_SESSIONS = 5;
-
-function isTeacherDemoCalendarUser(user: { email?: string } | null): boolean {
-  return (user?.email?.toLowerCase().includes('@demo.') ?? false) === true;
-}
-
-function addCalendarDays(ymd: string, deltaDays: number): string {
-  const [y, mo, d] = ymd.split('-').map(Number);
-  const dt = new Date(y, mo - 1, d);
-  dt.setDate(dt.getDate() + deltaDays);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
 
 function isSameLocalCalendarDay(ymd: string, when = new Date()): boolean {
   const yy = when.getFullYear();
@@ -237,25 +225,15 @@ export default function TeacherCourseEditionPage() {
     [sorted],
   );
 
-  const demoLockedFuturePlaceholders = useMemo(() => {
-    if (!isTeacherDemoCalendarUser(user) || !firstFutureSession) return [];
-    const taken = new Set(sorted.map((s) => s.date));
-    const out: { key: string; date: string; start_time?: string }[] = [];
-    let offset = 7;
-    while (out.length < TEACHER_DEMO_EXTRA_SESSIONS && offset <= 7 * 52) {
-      const candidate = addCalendarDays(firstFutureSession.date, offset);
-      if (!taken.has(candidate)) {
-        taken.add(candidate);
-        out.push({
-          key: `__demo_locked_${out.length}_${candidate}`,
-          date: candidate,
-          start_time: firstFutureSession.start_time,
-        });
-      }
-      offset += 7;
-    }
-    return out;
-  }, [sorted, user, firstFutureSession]);
+  const demoLockedFuturePlaceholders = useMemo(
+    () =>
+      buildDemoEditionFuturePlaceholders(
+        sorted,
+        firstFutureSession,
+        isDemoCalendarAccount(user),
+      ),
+    [sorted, user, firstFutureSession],
+  );
 
   const flowSessionForDemoExtras = firstFutureSession ?? sorted[0];
 

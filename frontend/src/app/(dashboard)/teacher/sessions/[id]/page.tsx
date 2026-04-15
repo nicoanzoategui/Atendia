@@ -309,23 +309,10 @@ export default function TeacherSessionDetailPage() {
     };
   }, [user, sessionId, load]);
 
-  useEffect(() => {
-    // eslint-disable-next-line no-console -- debug roster payload from GET /sessions/:id/students
-    console.log('students raw:', JSON.stringify(students, null, 2));
-  }, [students]);
+  /** Live panel only: do not seed from DB rows (would show stale/seed scans as “recent”). */
+  const emptyLiveAttendanceSeed = useMemo(() => [] as Record<string, unknown>[], []);
 
-  const initialAttendance = useMemo(
-    () =>
-      students
-        .filter((s) => s.attendance)
-        .map((s) => ({
-          ...s.attendance,
-          student_id: s.student_id,
-        })) as Record<string, unknown>[],
-    [students],
-  );
-
-  const liveAttendance = useRealtimeAttendance(sessionId, initialAttendance);
+  const liveAttendance = useRealtimeAttendance(sessionId, emptyLiveAttendanceSeed);
 
   const rules = session ? sessionRules(session.status) : null;
 
@@ -803,8 +790,8 @@ export default function TeacherSessionDetailPage() {
             <p className="mt-4 text-center text-xs font-bold uppercase tracking-widest text-[#8A9BB5]">
               MUESTRA ESTE CÓDIGO A TUS ALUMNOS
             </p>
-            <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-wider text-[#8A9BB5]">
-              ⚙ SIMULAR INGRESOS MASIVOS
+            <p className="mt-3 text-center text-[10px] font-semibold leading-snug text-[#94A3B8]">
+              Los escaneos de esta clase abierta aparecen abajo al instante (tiempo real).
             </p>
             <p className="mt-2 text-center text-xs font-semibold text-[#8A9BB5]">
               Rotación en <span className="tabular-nums">{formatCountdown(timeLeft)}</span>
@@ -913,10 +900,14 @@ export default function TeacherSessionDetailPage() {
               <span className="h-2 w-2 rounded-full bg-[#1B3FD8]" />
               REGISTROS RECIENTES
             </p>
-            <p className="mb-3 text-xs font-bold text-[#8A9BB5]">
-              Escaneados:{' '}
+            <p className="mb-1 text-xs font-bold text-[#8A9BB5]">
+              En esta pantalla:{' '}
               <span className="text-lg font-black text-[#0D1B4B]">{scannedCount}</span> /{' '}
               {students.length}
+            </p>
+            <p className="mb-3 text-[10px] font-semibold leading-snug text-[#94A3B8]">
+              Contador = escaneos QR captados en vivo acá (no incluye registros viejos de la base). En &quot;Lista&quot;
+              ves el estado completo del curso.
             </p>
             <ul className="flex flex-col gap-3">
               {recentQrStudents.map((s, i) => {

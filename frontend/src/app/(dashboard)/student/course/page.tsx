@@ -12,9 +12,17 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import {
+  buildDemoEditionFuturePlaceholders,
+  isDemoCalendarAccount,
+  isDemoEditionCalendarExtraId,
+} from '@/lib/demo-edition-calendar-extras';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
-import { studentSessionNeedsQrScanFlow } from '@/lib/student-attendance';
+import {
+  mergeStudentMyAttendance,
+  studentSessionNeedsQrScanFlow,
+} from '@/lib/student-attendance';
 
 type MyCourseResponse = {
   edition: {
@@ -119,12 +127,12 @@ function mergeAttendance(
   const map = new Map(myCourseSessions.map((s) => [s.id, s.my_attendance]));
   return fromApi.map((s) => ({
     ...s,
-    my_attendance: map.get(s.id) ?? s.my_attendance ?? null,
+    my_attendance: mergeStudentMyAttendance(s.my_attendance, map.get(s.id)) as EditionSession['my_attendance'],
   }));
 }
 
 function pickNextSession(sessions: EditionSession[], today: string): EditionSession | null {
-  const usable = sessions.filter((s) => !isCancelled(s));
+  const usable = sessions.filter((s) => !isCancelled(s) && !isDemoEditionCalendarExtraId(s.id));
   const upcoming = usable
     .filter((s) => s.date >= today)
     .filter((s) => studentSessionNeedsQrScanFlow(s.my_attendance, s.date, today))
@@ -194,20 +202,46 @@ export default function StudentCoursePage() {
 
   useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
 
+  const calendarSessions = useMemo(() => {
+    const base = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+    if (!isDemoCalendarAccount(user)) return base;
+    const sorted = [...base].sort((a, b) => {
+      const c = a.date.localeCompare(b.date);
+      if (c !== 0) return c;
+      return (a.start_time || '').localeCompare(b.start_time || '');
+    });
+    const firstFuture = sorted.find((s) => s.date >= today);
+    const slots = buildDemoEditionFuturePlaceholders(sorted, firstFuture, true);
+    if (!firstFuture || slots.length === 0) return base;
+    const extras: EditionSession[] = slots.map((p) => ({
+      ...firstFuture,
+      id: p.key,
+      date: p.date,
+      start_time: p.start_time,
+      my_attendance: null,
+      status: 'scheduled',
+    }));
+    return [...base, ...extras].sort((a, b) => {
+      const c = a.date.localeCompare(b.date);
+      if (c !== 0) return c;
+      return (a.start_time || '').localeCompare(b.start_time || '');
+    });
+  }, [editionSessions, myCourse?.sessions, user, today]);
+
   const courseMeta = useMemo(() => {
     if (!myCourse?.edition) return null;
-    return buildCourseMeta(myCourse.edition, editionSessions.length ? editionSessions : (myCourse.sessions ?? []));
-  }, [myCourse, editionSessions]);
+    return buildCourseMeta(myCourse.edition, calendarSessions.length ? calendarSessions : (myCourse.sessions ?? []));
+  }, [myCourse, calendarSessions]);
 
   const nextClass = useMemo(
-    () => pickNextSession(editionSessions.length ? editionSessions : (myCourse?.sessions ?? []), today),
-    [editionSessions, myCourse, today],
+    () => pickNextSession(calendarSessions.length ? calendarSessions : (myCourse?.sessions ?? []), today),
+    [calendarSessions, myCourse, today],
   );
 
   const hasAnyUpcomingSession = useMemo(() => {
-    const list = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+    const list = calendarSessions.length ? calendarSessions : (myCourse?.sessions ?? []);
     return list.some((s) => !isCancelled(s) && s.date >= today);
-  }, [editionSessions, myCourse, today]);
+  }, [calendarSessions, myCourse, today]);
 
   const nextLocLine = useMemo(() => {
     if (!nextClass) return '';
@@ -217,7 +251,7 @@ export default function StudentCoursePage() {
     return classroom ? `${location} · ${classroom}` : location;
   }, [nextClass, courseMeta]);
 
-  const sessionList = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+  const sessionList = calendarSessions.length ? calendarSessions : (myCourse?.sessions ?? []);
 
   if (loading) {
     return (

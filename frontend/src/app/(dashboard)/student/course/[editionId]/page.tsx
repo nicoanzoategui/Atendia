@@ -6,9 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronLeft, MapPin } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
+import {
+  buildDemoEditionFuturePlaceholders,
+  isDemoCalendarAccount,
+  isDemoEditionCalendarExtraId,
+} from '@/lib/demo-edition-calendar-extras';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
 import {
+  mergeStudentMyAttendance,
   studentSessionNeedsQrScanFlow,
   studentUpcomingQrPresenceConfirmed,
 } from '@/lib/student-attendance';
@@ -92,7 +98,7 @@ function mergeAttendance(fromEdition: SessionRow[], myCourseSessions: SessionRow
   const map = new Map(myCourseSessions.map((s) => [s.id, s.my_attendance]));
   return fromEdition.map((s) => ({
     ...s,
-    my_attendance: map.get(s.id) ?? s.my_attendance ?? null,
+    my_attendance: mergeStudentMyAttendance(s.my_attendance, map.get(s.id)) as SessionRow['my_attendance'],
   }));
 }
 
@@ -164,13 +170,56 @@ export default function StudentCourseEditionPage() {
 
   useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
 
-  const title = useMemo(() => formatCourseDisplayTitle(courseTitleFromSessions(sessions)), [sessions]);
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort((a, b) => {
+        const c = a.date.localeCompare(b.date);
+        if (c !== 0) return c;
+        return (a.start_time || '').localeCompare(b.start_time || '');
+      }),
+    [sessions],
+  );
+
+  const firstFutureSession = useMemo(
+    () => sortedSessions.find((s) => s.date >= today),
+    [sortedSessions, today],
+  );
+
+  const displaySessions = useMemo(() => {
+    if (!isDemoCalendarAccount(user)) return sessions;
+    const slots = buildDemoEditionFuturePlaceholders(
+      sortedSessions,
+      firstFutureSession,
+      true,
+    );
+    if (!firstFutureSession || slots.length === 0) return sessions;
+    const extras: SessionRow[] = slots.map((p) => ({
+      ...firstFutureSession,
+      id: p.key,
+      date: p.date,
+      start_time: p.start_time,
+      my_attendance: null,
+    }));
+    return [...sessions, ...extras].sort((a, b) => {
+      const c = a.date.localeCompare(b.date);
+      if (c !== 0) return c;
+      return (a.start_time || '').localeCompare(b.start_time || '');
+    });
+  }, [sessions, sortedSessions, firstFutureSession, user]);
+
+  const title = useMemo(
+    () => formatCourseDisplayTitle(courseTitleFromSessions(sessions)),
+    [sessions],
+  );
   const estimatedDate = useMemo(() => addDaysToYmd(today, 7), [today]);
   const showEstimatedCard = useMemo(() => allSessionsPast(sessions, today), [sessions, today]);
 
   const nearestUpcomingSessionId = useMemo(() => {
-    const upcoming = sessions.filter(
-      (s) => s.date >= today && studentSessionNeedsQrScanFlow(s.my_attendance, s.date, today),
+    const upcoming = displaySessions.filter(
+      (s) =>
+        !isDemoEditionCalendarExtraId(s.id) &&
+        s.date >= today &&
+        studentSessionNeedsQrScanFlow(s.my_attendance, s.date, today),
     );
     if (upcoming.length === 0) return null;
     upcoming.sort((a, b) => {
@@ -179,7 +228,7 @@ export default function StudentCourseEditionPage() {
       return (a.start_time || '').localeCompare(b.start_time || '');
     });
     return upcoming[0]?.id ?? null;
-  }, [sessions, today]);
+  }, [displaySessions, today]);
 
   if (loading) {
     return (
@@ -223,7 +272,7 @@ export default function StudentCourseEditionPage() {
 
         <header className="mt-4">
           <h1 className="text-2xl font-black uppercase text-[#0D1B4B]">{title}</h1>
-          <p className="mt-1 text-xs uppercase text-[#8A9BB5]">{sessions.length} CLASES</p>
+          <p className="mt-1 text-xs uppercase text-[#8A9BB5]">{displaySessions.length} CLASES</p>
         </header>
 
         <section className="mt-8">
@@ -234,9 +283,10 @@ export default function StudentCourseEditionPage() {
             <div className="h-px flex-1 bg-[#CBD5E1]" />
           </div>
 
-          {sessions.map((s) => {
+          {displaySessions.map((s) => {
             const past = s.date < today;
             const upcoming = !past;
+            const isDemoExtra = isDemoEditionCalendarExtraId(s.id);
             const loc = formatSessionLocationVenue(s);
             const isNearestUpcoming = upcoming && nearestUpcomingSessionId === s.id;
             const att = s.my_attendance?.status;
@@ -291,7 +341,12 @@ export default function StudentCourseEditionPage() {
                 ) : null}
 
                 {upcoming ? (
-                  studentUpcomingQrPresenceConfirmed(s.my_attendance, s.date, today) ? (
+                  isDemoExtra ? (
+                    <p className="atendee-muted mt-3 text-center text-[10px] font-semibold leading-snug">
+                      Fecha tentativa del calendario demo (sin sesión en el sistema). El QR aplica a las clases
+                      reales del docente.
+                    </p>
+                  ) : studentUpcomingQrPresenceConfirmed(s.my_attendance, s.date, today) ? (
                     <p className="mt-3 rounded-[12px] bg-[#F0FDF4] py-3 text-center text-xs font-bold uppercase text-[#166534]">
                       Asistencia registrada
                     </p>
