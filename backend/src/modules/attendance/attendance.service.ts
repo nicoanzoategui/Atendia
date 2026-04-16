@@ -51,24 +51,34 @@ export class AttendanceService {
       throw new BadRequestException('No estás inscrito en esta sesión');
     }
 
-    // Determine status: Presente vs Tarde
-    const { data: session } = await this.supabaseService.getClient()
+    const { data: session, error: sessionErr } = await this.supabaseService.getClient()
       .from('class_session')
       .select('*')
       .eq('id', qrData.class_id)
       .single();
 
-    const now = new Date();
-    const startTimeParts = session.start_time.split(':');
-    const sessionStartTime = new Date(now);
-    sessionStartTime.setHours(parseInt(startTimeParts[0]), parseInt(startTimeParts[1]), 0, 0);
-
-    const diffMins = (now.getTime() - sessionStartTime.getTime()) / (1000 * 60);
-
-    let status = 'present';
-    if (diffMins > 15) {
-      status = 'late';
+    if (sessionErr || !session) {
+      throw new BadRequestException('Sesión no encontrada');
     }
+
+    const sessionStatus = String(session.status ?? '').toLowerCase();
+    if (sessionStatus !== 'attendance_open') {
+      if (sessionStatus === 'scheduled') {
+        throw new BadRequestException(
+          'El docente aún no abrió la asistencia para esta clase. Pedile que inicie el código QR.',
+        );
+      }
+      if (sessionStatus === 'attendance_closed' || sessionStatus === 'finalized') {
+        throw new BadRequestException('La toma de asistencia de esta clase ya está cerrada.');
+      }
+      if (sessionStatus === 'cancelled') {
+        throw new BadRequestException('Esta clase fue cancelada.');
+      }
+      throw new BadRequestException('No se puede registrar asistencia con QR en este estado de la clase.');
+    }
+
+    /** Por requisito de producto: escaneo QR = presente (sin “tarde” automática). */
+    const status = 'present';
 
     const { data, error } = await this.supabaseService.getClient()
       .from('attendance_record')

@@ -20,6 +20,13 @@ export function isSessionDatePast(sessionDate: string): boolean {
   return sessionDate < todayStrLocal();
 }
 
+/** Tarjeta “cerrada” en UI docente: fecha pasada o asistencia ya cerrada / finalizada / cancelada. */
+export function isTeacherSessionCardClosed(sessionDate: string, status?: string): boolean {
+  if (isSessionDatePast(sessionDate)) return true;
+  const s = String(status ?? '').toLowerCase();
+  return s === 'attendance_closed' || s === 'finalized' || s === 'cancelled';
+}
+
 export function formatShortDate(isoDate: string) {
   const [y, mo, d] = isoDate.split('-').map(Number);
   const dt = new Date(y, mo - 1, d);

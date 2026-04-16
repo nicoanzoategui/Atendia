@@ -16,6 +16,7 @@ import {
   datePlusDaysLocal,
   formatShortDate,
   isSessionDatePast,
+  isTeacherSessionCardClosed,
   locationLine,
   teacherDisplayFromUser,
 } from '@/lib/teacher-session-display';
@@ -263,7 +264,7 @@ export default function TeacherCourseEditionPage() {
 
       <ul className="flex flex-col gap-4">
         {sorted.map((row) => {
-          const cerrada = isSessionDatePast(row.date);
+          const cerrada = isTeacherSessionCardClosed(row.date, row.status);
           const proxima = !cerrada;
           return (
             <li

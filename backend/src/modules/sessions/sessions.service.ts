@@ -487,13 +487,15 @@ export class SessionsService {
       
     if (attendanceError) throw new BadRequestException(attendanceError.message);
 
-    return data.map(s => ({
+    const rows = data ?? [];
+    const attRows = attendance ?? [];
+    return rows.map((s) => ({
       ...s,
       class_display_id: this.buildClassDisplayId({
         ...s,
         classroom: s.class_session?.classroom,
       }),
-      attendance: attendance.find(a => a.student_id === s.student_id) || null
+      attendance: attRows.find((a) => a.student_id === s.student_id) || null,
     }));
   }
 }

@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, CloudAlert } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { QrScanner } from '@/components/qr/qr-scanner';
@@ -11,14 +11,16 @@ import { requestDashboardRefetch } from '@/lib/dashboard-refetch';
 
 type ScanState = 'scanning' | 'success' | 'error' | 'offline';
 
-export default function StudentScanPage() {
+function StudentScanContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [scanState, setScanState] = useState<ScanState>('scanning');
   const [errorMsg, setErrorMsg] = useState('');
   const [successRegisteredAt, setSuccessRegisteredAt] = useState<Date | null>(null);
   const [scannerKey, setScannerKey] = useState(0);
   const busyRef = useRef(false);
+  const urlTokenConsumedRef = useRef<string | null>(null);
 
   const handleScan = useCallback(
     async (token: string) => {
@@ -39,7 +41,9 @@ export default function StudentScanPage() {
         });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { message?: string };
-          throw new Error(data.message || 'QR inválido o expirado');
+          throw new Error(
+            typeof data.message === 'string' ? data.message : 'QR inválido o expirado',
+          );
         }
         setSuccessRegisteredAt(new Date());
         setScanState('success');
@@ -70,6 +74,15 @@ export default function StudentScanPage() {
     },
     [user],
   );
+
+  /** Link compartido por el docente: /student/scan?token=… */
+  useEffect(() => {
+    const raw = searchParams.get('token')?.trim();
+    if (!raw || !user) return;
+    if (urlTokenConsumedRef.current === raw) return;
+    urlTokenConsumedRef.current = raw;
+    void handleScan(raw);
+  }, [searchParams, user, handleScan]);
 
   return (
     <div className="min-h-screen bg-[#EEF2F7] px-4 py-6 pb-24">
@@ -167,6 +180,7 @@ export default function StudentScanPage() {
                   type="button"
                   onClick={() => {
                     setErrorMsg('');
+                    urlTokenConsumedRef.current = null;
                     setScanState('scanning');
                     setScannerKey((k) => k + 1);
                   }}
@@ -201,5 +215,21 @@ export default function StudentScanPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ScanFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#EEF2F7] px-4">
+      <div className="h-10 w-10 animate-pulse rounded-xl bg-white/80" aria-hidden />
+    </div>
+  );
+}
+
+export default function StudentScanPage() {
+  return (
+    <Suspense fallback={<ScanFallback />}>
+      <StudentScanContent />
+    </Suspense>
   );
 }

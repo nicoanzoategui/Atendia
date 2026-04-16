@@ -12,6 +12,7 @@ import {
   datePlusDaysLocal,
   formatShortDate,
   isSessionDatePast,
+  isTeacherSessionCardClosed,
   locationLine,
   teacherDisplayFromUser,
   todayStrLocal,
@@ -313,7 +314,9 @@ export default function TeacherCoursesPage() {
 
   const sede = (s: SessionRow) => s.location_campus || s.location_classroom || '—';
 
-  const nextClassProxima = nextClass ? !isSessionDatePast(nextClass.date) : false;
+  const nextClassProxima = nextClass
+    ? !isTeacherSessionCardClosed(nextClass.date, nextClass.status)
+    : false;
 
   return (
     <div className="space-y-6">

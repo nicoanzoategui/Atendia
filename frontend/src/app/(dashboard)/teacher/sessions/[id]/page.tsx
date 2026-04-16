@@ -439,13 +439,48 @@ export default function TeacherSessionDetailPage() {
     }
   }
 
+  /** Al elegir QR, abrir la clase en backend si sigue en scheduled (sin esto el alumno no puede escanear). */
+  const beginAttendanceMethod = useCallback(
+    async (tab: TabId) => {
+      if (tab === 'qr' && session && String(session.status ?? '').toLowerCase() === 'scheduled') {
+        setError(null);
+        setActionLoading('/open');
+        try {
+          await apiClient(`/sessions/${encodeURIComponent(sessionId)}/open`, { method: 'PATCH' });
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'No se pudo abrir la asistencia');
+          return;
+        } finally {
+          setActionLoading(null);
+        }
+      }
+      setMethod(tab);
+    },
+    [session, sessionId, load],
+  );
+
+  /** Refresco periódico en pestaña QR por si Realtime (Supabase) no está activo en el cliente. */
+  useEffect(() => {
+    if (method !== 'qr' || !sessionId) return;
+    const id = window.setInterval(() => {
+      void load();
+    }, 10000);
+    return () => window.clearInterval(id);
+  }, [method, sessionId, load]);
+
   const scannedCount = useMemo(() => {
     const seen = new Set<string>();
     for (const a of liveAttendance as { student_id?: string; method?: string }[]) {
       if (a.method === 'qr' && a.student_id) seen.add(a.student_id);
     }
+    for (const s of students) {
+      if (String(s.attendance?.method ?? '').toLowerCase() === 'qr' && s.student_id) {
+        seen.add(s.student_id);
+      }
+    }
     return seen.size;
-  }, [liveAttendance]);
+  }, [liveAttendance, students]);
 
   const recentQrStudents = useMemo(() => {
     const seen = new Set<string>();
@@ -455,6 +490,14 @@ export default function TeacherSessionDetailPage() {
       seen.add(a.student_id);
       const st = students.find((x) => x.student_id === a.student_id);
       if (st) out.push(st);
+    }
+    if (out.length > 0) return out;
+    for (const s of students) {
+      if (String(s.attendance?.method ?? '').toLowerCase() !== 'qr') continue;
+      const sid = s.student_id;
+      if (!sid || seen.has(sid)) continue;
+      seen.add(sid);
+      out.push(s);
     }
     return out;
   }, [liveAttendance, students]);
@@ -752,7 +795,7 @@ export default function TeacherSessionDetailPage() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setMethod(t.id)}
+                onClick={() => void beginAttendanceMethod(t.id)}
                 className="atendee-card flex w-full cursor-pointer items-center gap-4 p-5 text-left transition hover:bg-gray-50"
               >
                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#EEF2F7] text-[#1B3FD8]">

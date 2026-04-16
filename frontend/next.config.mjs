@@ -25,33 +25,8 @@ const withPWA = withPWAInit({
           },
         },
       },
-      // Backend NestJS — sesiones y alumnos (lectura offline)
-      {
-        urlPattern: /\/sessions(\/.*)?$/,
-        handler: "NetworkFirst",
-        options: {
-          cacheName: "backend-sessions",
-          networkTimeoutSeconds: 3,
-          expiration: {
-            maxEntries: 50,
-            maxAgeSeconds: 60 * 60 * 24,
-          },
-        },
-      },
-      // Backend NestJS — escritura de asistencia (nunca cachear)
-      {
-        urlPattern: /\/attendance\/(qr|manual|sync)$/,
-        handler: "NetworkOnly",
-        options: {
-          cacheName: "backend-attendance-write",
-          backgroundSync: {
-            name: "attendance-sync-queue",
-            options: {
-              maxRetentionTime: 60 * 24, // 24 horas en minutos
-            },
-          },
-        },
-      },
+      // No cachear el API Nest por patrón /sessions: el RegExp matchea también
+      // https://…-api…/sessions/… y el SW rompe o entorpece PDF, lista y analyze-photo.
     ],
   },
 });
