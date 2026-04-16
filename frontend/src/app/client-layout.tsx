@@ -15,9 +15,20 @@ export default function RootLayout({
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user && window.location.pathname !== '/login') {
-      router.push('/login');
-    }
+    if (loading || user) return;
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname === '/login') return;
+
+    router.replace('/login');
+
+    const fallbackMs = 2000;
+    const t = window.setTimeout(() => {
+      if (window.location.pathname !== '/login') {
+        window.location.replace(`${window.location.origin}/login`);
+      }
+    }, fallbackMs);
+
+    return () => window.clearTimeout(t);
   }, [user, loading, router]);
 
   if (loading) {

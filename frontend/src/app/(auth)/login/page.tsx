@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { dashboardPathForRole } from '@/lib/auth/dashboard-path';
@@ -13,14 +13,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (loading || !user) return;
     router.replace(dashboardPathForRole(user.role));
   }, [user, loading, router]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitLogin() {
     setError(null);
     setSubmitting(true);
     try {
@@ -68,7 +68,13 @@ export default function LoginPage() {
         <h1 className="text-center text-2xl font-black tracking-tight text-gray-900">Atendia</h1>
         <p className="mt-1 text-center text-sm text-gray-500">Iniciá sesión con tu cuenta</p>
 
-        <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4">
+        <form
+          ref={formRef}
+          onSubmit={(e) => {
+            e.preventDefault();
+          }}
+          className="mt-8 flex flex-col gap-4"
+        >
           <div>
             <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-gray-600">
               Email
@@ -99,8 +105,12 @@ export default function LoginPage() {
           </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
-            type="submit"
+            type="button"
             disabled={submitting}
+            onClick={() => {
+              if (!formRef.current?.reportValidity()) return;
+              void submitLogin();
+            }}
             className="mt-2 rounded-xl bg-gray-900 py-3 text-sm font-bold text-white transition hover:bg-gray-800 disabled:opacity-50"
           >
             {submitting ? 'Entrando…' : 'Entrar'}

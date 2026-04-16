@@ -9,17 +9,45 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function checkAuth() {
-      const tokenData = await getAuthToken();
-      if (tokenData && tokenData.expiresAt > Date.now()) {
-        setUser(tokenData.user);
-      } else {
-        await clearAuthToken();
-        setUser(null);
+      const TIMEOUT_MS = 5000;
+      const attempts = 3;
+
+      for (let i = 0; i < attempts; i++) {
+        try {
+          const tokenData = await Promise.race([
+            getAuthToken(),
+            new Promise<null>((_, reject) =>
+              setTimeout(() => reject(new Error('auth-read-timeout')), TIMEOUT_MS),
+            ),
+          ]);
+          if (cancelled) return;
+          if (tokenData && tokenData.expiresAt > Date.now()) {
+            setUser(tokenData.user);
+          } else {
+            await clearAuthToken();
+            setUser(null);
+          }
+          setLoading(false);
+          return;
+        } catch {
+          if (cancelled) return;
+          if (i < attempts - 1) {
+            await new Promise((r) => setTimeout(r, 350 * (i + 1)));
+            continue;
+          }
+          setUser(null);
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
+
     checkAuth();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = async (token: string, userData: AuthToken['user']) => {
