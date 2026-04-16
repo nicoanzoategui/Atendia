@@ -13,6 +13,7 @@ import {
   isDemoCalendarAccount,
 } from '@/lib/demo-edition-calendar-extras';
 import {
+  datePlusDaysLocal,
   formatShortDate,
   isSessionDatePast,
   locationLine,
@@ -147,16 +148,6 @@ function teachersSubtitle(rows: ClassRow[]): string {
 
 function sessionSortKey(r: ClassRow) {
   return `${r.date}T${(r.start_time || '00:00').slice(0, 5)}`;
-}
-
-/** YYYY-MM-DD local, hoy + `days`. */
-function datePlusDaysLocal(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 function Skeleton() {

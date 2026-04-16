@@ -9,6 +9,7 @@ import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
 import { generateAttendancePDF } from '@/lib/teacher-attendance-pdf';
 import {
+  datePlusDaysLocal,
   formatShortDate,
   isSessionDatePast,
   locationLine,
@@ -207,7 +208,7 @@ export default function TeacherCoursesPage() {
     });
   }, [user, fetchMergedSessions]);
 
-  const { nextClass, courseCards } = useMemo(() => {
+  const { nextClass, nextClassIsEstimated, courseCards } = useMemo(() => {
     const futureSessions = sessions
       .filter((s) => !isCancelledSession(s))
       .filter((s) => s.date >= today)
@@ -219,7 +220,52 @@ export default function TeacherCoursesPage() {
 
     // Siempre la próxima por fecha (como en el detalle de cursada). Si ya está cerrada,
     // el CTA pasa a "Ver detalle" — no ocultar el banner entero.
-    const next = futureSessions[0] ?? null;
+    let next: SessionRow | null = futureSessions[0] ?? null;
+    let nextIsEstimated = false;
+
+    // Igual que en `/teacher/courses/[id]`: si no hay fechas futuras en el calendario pero
+    // una cursada tiene todas las clases ya pasadas, mostrar próxima estimada (hoy + 7).
+    if (!next && sessions.length > 0) {
+      const editionRows = new Map<string, SessionRow[]>();
+      for (const s of sessions) {
+        const eid = s.learning_proposal_edition_id;
+        if (!eid || isCancelledSession(s)) continue;
+        const list = editionRows.get(eid);
+        if (list) list.push(s);
+        else editionRows.set(eid, [s]);
+      }
+      type Cand = { sorted: SessionRow[] };
+      const candidates: Cand[] = [];
+      for (const rows of editionRows.values()) {
+        const sorted = [...rows].sort((a, b) => {
+          const c = a.date.localeCompare(b.date);
+          if (c !== 0) return c;
+          return (a.start_time || '').localeCompare(b.start_time || '');
+        });
+        if (sorted.length === 0) continue;
+        const allPast = sorted.every((r) => isSessionDatePast(r.date));
+        if (!allPast) continue;
+        candidates.push({ sorted });
+      }
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => {
+          const la = a.sorted[a.sorted.length - 1]!.date;
+          const lb = b.sorted[b.sorted.length - 1]!.date;
+          return lb.localeCompare(la);
+        });
+        const pick = candidates[0]!;
+        const sorted = pick.sorted;
+        const last = sorted[sorted.length - 1]!;
+        const first = sorted[0]!;
+        const estimatedDate = datePlusDaysLocal(7);
+        next = {
+          ...last,
+          id: first.id,
+          date: estimatedDate,
+        };
+        nextIsEstimated = true;
+      }
+    }
 
     const byEdition = new Map<
       string,
@@ -251,6 +297,7 @@ export default function TeacherCoursesPage() {
 
     return {
       nextClass: next,
+      nextClassIsEstimated: nextIsEstimated,
       courseCards: [...byEdition.values()],
     };
   }, [sessions, today]);
@@ -325,7 +372,7 @@ export default function TeacherCoursesPage() {
                 </Link>
               )}
             </div>
-            {nextClassProxima && !isCancelledSession(nextClass) ? (
+            {nextClassProxima && !isCancelledSession(nextClass) && !nextClassIsEstimated ? (
               <button
                 type="button"
                 disabled={pdfLoadingId === nextClass.id}
@@ -349,6 +396,11 @@ export default function TeacherCoursesPage() {
               </button>
             ) : null}
           </div>
+          {nextClassIsEstimated ? (
+            <p className="mt-3 text-center text-[10px] font-semibold leading-tight text-[#94A3B8]">
+              * Próxima clase estimada
+            </p>
+          ) : null}
         </section>
       ) : (
         <section className="atendee-card border-2 border-dashed border-gray-200 p-6 text-center text-sm font-semibold text-[#8A9BB5]">
