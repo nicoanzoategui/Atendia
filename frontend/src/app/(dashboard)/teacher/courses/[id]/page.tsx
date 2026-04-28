@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronLeft, MapPin, Wifi } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { generateAttendancePDF } from '@/lib/teacher-attendance-pdf';
+import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { useRefetchWhenVisible } from '@/lib/hooks/use-refetch-when-visible';
 import {
   buildDemoEditionFuturePlaceholders,
   isDemoCalendarAccount,
@@ -177,25 +179,33 @@ export default function TeacherCourseEditionPage() {
     return () => clearInterval(id);
   }, []);
 
+  const load = useCallback(async () => {
+    if (!editionId) return;
+    try {
+      const data = await apiClient<ClassRow[]>(
+        `/sessions/edition/${encodeURIComponent(editionId)}`,
+      );
+      setClasses(data ?? []);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al cargar');
+    }
+  }, [editionId]);
+
   useEffect(() => {
     if (!user || !editionId) return;
     let cancelled = false;
     (async () => {
-      try {
-        const data = await apiClient<ClassRow[]>(
-          `/sessions/edition/${encodeURIComponent(editionId)}`,
-        );
-        if (!cancelled) setClasses(data ?? []);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Error al cargar');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await load();
+      if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [user, editionId]);
+  }, [user, editionId, load]);
+
+  useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
+  useRefetchWhenVisible(() => void load(), Boolean(user));
 
   const title = useMemo(() => coursePageTitle(classes), [classes]);
   const teachersLine = useMemo(() => teachersSubtitle(classes), [classes]);
@@ -315,7 +325,7 @@ export default function TeacherCourseEditionPage() {
                     </Link>
                   )}
                 </div>
-                {proxima && String(row.status ?? '').toLowerCase() !== 'cancelled' ? (
+                {String(row.status ?? '').toLowerCase() !== 'cancelled' ? (
                   <button
                     type="button"
                     disabled={pdfLoadingId === row.id}

@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 
 @Injectable()
@@ -497,5 +502,104 @@ export class SessionsService {
       }),
       attendance: attRows.find((a) => a.student_id === s.student_id) || null,
     }));
+  }
+
+  /**
+   * Inscribe en la clase a un alumno del tenant encontrado por DNI / documento (external_id).
+   * Usado cuando el OCR no lista a alguien pero el docente valida contra el padrón.
+   */
+  async addStudentToRosterByDocument(
+    sessionId: string,
+    teacherId: string,
+    tenantId: string,
+    dto: { document: string; firstName?: string; lastName?: string },
+  ) {
+    const docRaw = (dto.document ?? '').trim();
+    if (!docRaw) {
+      throw new BadRequestException('Documento obligatorio');
+    }
+    const normDigits = docRaw.replace(/\D/g, '');
+    if (normDigits.length < 6) {
+      throw new BadRequestException('Documento incompleto (mínimo 6 dígitos)');
+    }
+
+    const client = this.supabaseService.getClient();
+
+    const { data: teachChk } = await client
+      .from('class_session_teacher')
+      .select('teacher_id')
+      .eq('class_session_id', sessionId)
+      .eq('teacher_id', teacherId)
+      .maybeSingle();
+    if (!teachChk) {
+      throw new ForbiddenException('No tenés asignada esta clase');
+    }
+
+    const { data: session, error: sesErr } = await client
+      .from('class_session')
+      .select('id, tenant_id')
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (sesErr || !session) {
+      throw new BadRequestException('Sesión no encontrada');
+    }
+
+    const digitsOf = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+
+    const { data: students, error: usrErr } = await client
+      .from('app_user')
+      .select('id, external_id')
+      .eq('tenant_id', tenantId)
+      .eq('role', 'student');
+
+    if (usrErr) throw new BadRequestException(usrErr.message);
+
+    const match =
+      (students ?? []).find((u) => {
+        const e = String(u.external_id ?? '').trim();
+        return e === docRaw || digitsOf(u.external_id) === normDigits;
+      }) ?? null;
+
+    if (!match) {
+      throw new NotFoundException('No encontramos un alumno con ese documento en el instituto');
+    }
+
+    const { data: already } = await client
+      .from('class_session_student')
+      .select('id')
+      .eq('class_session_id', sessionId)
+      .eq('student_id', match.id)
+      .maybeSingle();
+
+    const fn = (dto.firstName ?? '').trim();
+    const ln = (dto.lastName ?? '').trim();
+    let studentName =
+      `${fn}${fn && ln ? ' ' : ''}${ln}`.trim() ||
+      ([fn, ln].some((x) => x !== '') ? [fn, ln].filter(Boolean).join(' ') : '');
+
+    if (studentName === '') {
+      studentName = '';
+    }
+
+    if (!already) {
+      const extStored = match.external_id?.trim()
+        ? String(match.external_id).trim()
+        : normDigits;
+      const { error: insErr } = await client.from('class_session_student').insert({
+        class_session_id: sessionId,
+        student_id: match.id,
+        student_external_id: extStored,
+        tenant_id: tenantId,
+        student_name: studentName !== '' ? studentName : null,
+      });
+      if (insErr) throw new BadRequestException(insErr.message);
+    }
+
+    const list = await this.getStudents(sessionId);
+    const row = list.find((r) => String(r.student_id) === String(match.id));
+
+    return { ok: true, student: row ?? null };
   }
 }

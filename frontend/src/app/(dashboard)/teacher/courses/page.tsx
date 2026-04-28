@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { apiClient } from '@/lib/api/client';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { useRefetchWhenVisible } from '@/lib/hooks/use-refetch-when-visible';
 import { generateAttendancePDF } from '@/lib/teacher-attendance-pdf';
 import {
   datePlusDaysLocal,
@@ -209,6 +210,16 @@ export default function TeacherCoursesPage() {
     });
   }, [user, fetchMergedSessions]);
 
+  useRefetchWhenVisible(
+    () => {
+      if (!user) return;
+      void fetchMergedSessions()
+        .then((merged) => setSessions(merged))
+        .catch(() => {});
+    },
+    Boolean(user),
+  );
+
   const { nextClass, nextClassIsEstimated, courseCards } = useMemo(() => {
     const futureSessions = sessions
       .filter((s) => !isCancelledSession(s))
@@ -375,7 +386,7 @@ export default function TeacherCoursesPage() {
                 </Link>
               )}
             </div>
-            {nextClassProxima && !isCancelledSession(nextClass) && !nextClassIsEstimated ? (
+            {!isCancelledSession(nextClass) && !nextClassIsEstimated ? (
               <button
                 type="button"
                 disabled={pdfLoadingId === nextClass.id}

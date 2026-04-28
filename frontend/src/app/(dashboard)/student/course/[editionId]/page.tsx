@@ -13,6 +13,7 @@ import {
 } from '@/lib/demo-edition-calendar-extras';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { useRefetchWhenVisible } from '@/lib/hooks/use-refetch-when-visible';
 import {
   mergeStudentMyAttendance,
   studentSessionNeedsQrScanFlow,
@@ -169,6 +170,7 @@ export default function StudentCourseEditionPage() {
   }, [user, editionId, load]);
 
   useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
+  useRefetchWhenVisible(() => void load(), Boolean(user));
 
   const sortedSessions = useMemo(
     () =>
@@ -321,11 +323,9 @@ export default function StudentCourseEditionPage() {
                   <span className="text-xs text-[#8A9BB5]">{formatDayMonth(s.date)}</span>
                 </div>
 
-                <p className="mt-3 text-2xl font-black text-[#0D1B4B]">
-                  {sessionTimeLabel(s.start_time)}
-                </p>
-                <p className="mt-1 text-sm font-bold leading-snug text-[#0D1B4B]">
-                  {title} · {formatDayMonth(s.date)} · {sessionTimeLabel(s.start_time)}
+                <p className="mt-3 text-lg font-black uppercase leading-snug text-[#0D1B4B]">{title}</p>
+                <p className="mt-2 text-base font-bold tabular-nums text-[#0D1B4B]">
+                  {formatDayMonth(s.date)} · {sessionTimeLabel(s.start_time)}
                 </p>
                 <p className="mt-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-[#8A9BB5]">
                   <MapPin className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />

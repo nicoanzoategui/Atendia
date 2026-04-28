@@ -19,6 +19,7 @@ import {
 } from '@/lib/demo-edition-calendar-extras';
 import { formatCourseDisplayTitle } from '@/lib/course-display-name';
 import { subscribeDashboardRefetch } from '@/lib/dashboard-refetch';
+import { useRefetchWhenVisible } from '@/lib/hooks/use-refetch-when-visible';
 import {
   mergeStudentMyAttendance,
   studentSessionNeedsQrScanFlow,
@@ -131,6 +132,10 @@ function mergeAttendance(
   }));
 }
 
+function dedupeSessionsById<T extends { id: string }>(list: T[]): T[] {
+  return list.filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
+}
+
 function pickNextSession(sessions: EditionSession[], today: string): EditionSession | null {
   const usable = sessions.filter((s) => !isCancelled(s) && !isDemoEditionCalendarExtraId(s.id));
   const upcoming = usable
@@ -180,7 +185,7 @@ export default function StudentCoursePage() {
       if (c !== 0) return c;
       return (a.start_time || '').localeCompare(b.start_time || '');
     });
-    setEditionSessions(list);
+    setEditionSessions(dedupeSessionsById(list));
   }, []);
 
   useEffect(() => {
@@ -201,9 +206,11 @@ export default function StudentCoursePage() {
   }, [user, load]);
 
   useEffect(() => subscribeDashboardRefetch(() => void load()), [load]);
+  useRefetchWhenVisible(() => void load(), Boolean(user));
 
   const calendarSessions = useMemo(() => {
-    const base = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+    const raw = editionSessions.length ? editionSessions : (myCourse?.sessions ?? []);
+    const base = dedupeSessionsById(raw);
     if (!isDemoCalendarAccount(user)) return base;
     const sorted = [...base].sort((a, b) => {
       const c = a.date.localeCompare(b.date);

@@ -46,6 +46,21 @@ export class SessionsController {
     return this.sessionsService.getEditionStudentStats(editionId, req.user.tenant_id);
   }
 
+  @Roles('teacher')
+  @Post(':id/roster/from-document')
+  async addStudentToRosterByDocument(
+    @Param('id') id: string,
+    @Body() body: { document: string; firstName?: string; lastName?: string },
+    @Request() req,
+  ) {
+    return this.sessionsService.addStudentToRosterByDocument(
+      id,
+      req.user.userId,
+      req.user.tenant_id,
+      body,
+    );
+  }
+
   @Get(':id')
   async getSession(@Param('id') id: string, @Request() req) {
     return this.sessionsService.getSession(id, req.user.tenant_id);

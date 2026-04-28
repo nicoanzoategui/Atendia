@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getPendingAttendance } from '../db/pending-attendance-store';
+import { getAllPendingSheetProcessed } from '../db/pending-sheet-list-store';
 import { useConnectivity } from '../sync/connectivity';
 
 export function useSyncStatus() {
@@ -10,8 +11,12 @@ export function useSyncStatus() {
 
   const refresh = async () => {
     try {
-      const records = await getPendingAttendance();
-      setPendingCount(records.filter(r => !r.synced).length);
+      const [records, sheetRows] = await Promise.all([
+        getPendingAttendance(),
+        getAllPendingSheetProcessed(),
+      ]);
+      const n = records.filter((r) => !r.synced).length + sheetRows.length;
+      setPendingCount(n);
     } catch {
       // IDB no disponible (ej: SSR)
     }

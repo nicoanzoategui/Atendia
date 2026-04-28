@@ -18,14 +18,32 @@ export class AttendanceController {
   @Roles('teacher')
   @Post('manual')
   async registerManual(
-    @Body() body: { studentId: string; sessionId: string; status: string },
+    @Body()
+    body: {
+      sessionId: string;
+      status: string;
+      /** UUID en app_user */
+      studentId?: string;
+      /** ID de campus / legajo (misma columna que en la comisión) */
+      studentExternalId?: string;
+      method?: 'manual_teacher' | 'ocr_upload' | 'admin';
+    },
     @Request() req
   ) {
-    return this.attendanceService.registerManual(
-      body.studentId,
+    return this.attendanceService.registerManual(body, req.user.userId);
+  }
+
+  /** Tras guardar asistencias desde lista en papel, registra el ID de lista del PDF (anti-duplicado). */
+  @Roles('teacher')
+  @Post('sheet-processed')
+  async markSheetProcessed(
+    @Body() body: { sessionId: string; listId: string },
+    @Request() req
+  ) {
+    return this.attendanceService.markSheetProcessed(
       body.sessionId,
-      body.status,
-      req.user.userId
+      body.listId,
+      req.user.userId,
     );
   }
 }

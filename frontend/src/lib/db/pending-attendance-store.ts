@@ -10,6 +10,8 @@ export interface PendingAttendance {
   /** qr = alumno escaneó; manual = docente marcó sin red */
   source?: 'qr' | 'manual';
   manual_status?: 'present' | 'late' | 'absent' | 'justified';
+  /** Método backend al sincronizar asistencia manual / lista OCR */
+  manual_method?: 'manual_teacher' | 'ocr_upload';
 }
 
 export async function savePendingAttendance(record: Omit<PendingAttendance, 'synced'>) {

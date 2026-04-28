@@ -11,6 +11,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { AttendanceService } from './attendance.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -72,7 +73,10 @@ function inlineMimeType(mime: string): string {
 export class AttendancePhotoController {
   private readonly logger = new Logger(AttendancePhotoController.name);
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly attendanceService: AttendanceService,
+  ) {}
 
   @Roles('teacher')
   @Post('analyze-photo')
@@ -84,10 +88,15 @@ export class AttendancePhotoController {
   async analyzePhoto(
     @UploadedFile() photo: UploadedImageFile | undefined,
     @Body('sessionId') sessionId: string | undefined,
+    @Body('listId') listId: string | undefined,
   ) {
     const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
     if (!sid) {
       throw new BadRequestException('sessionId es obligatorio');
+    }
+    const lid = typeof listId === 'string' ? listId.trim() : '';
+    if (lid) {
+      await this.attendanceService.assertListIdUnused(sid, lid);
     }
     if (!photo?.buffer?.length) {
       throw new BadRequestException('Archivo photo requerido (jpg/png)');

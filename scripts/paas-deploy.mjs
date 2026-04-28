@@ -4,6 +4,10 @@
  * Requires: PAAS_TOKEN (with or without "paas_" prefix)
  * Optional: PAAS_API_BASE (default https://api.new-feats.redtecnologica.org)
  * Optional: PAAS_PROJECT_ID, PAAS_DOMAIN_PREFIX, PAAS_ZONE
+ * Secrets (sin commitear backend/.env): PAAS_JWT_SECRET, PAAS_QR_SECRET,
+ *   PAAS_SUPABASE_URL, PAAS_SUPABASE_PUBLISHABLE_KEY, PAAS_SUPABASE_ANON_KEY,
+ *   PAAS_SUPABASE_SERVICE_ROLE_KEY, PAAS_SUPABASE_PROJECT_REF, PAAS_GEMINI_API_KEY
+ *   (override valores leídos de backend/.env si existe)
  * Optional: PAAS_REBUILD_SERVICE — e.g. "backend" → POST .../services/backend/rebuild (upload + rebuild only)
  * Optional: PAAS_REDEPLOY=1 — POST /deploy/{project_id}/redeploy (upload + full image rebuild, keeps service env/ports)
  */
@@ -51,6 +55,36 @@ function* walkFiles(dir, base = dir) {
       yield full;
     }
   }
+}
+
+function pickEnv(...keys) {
+  for (const k of keys) {
+    const v = process.env[k]?.trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
+function mergeBackendSecretsFromProcess(base) {
+  return {
+    ...base,
+    JWT_SECRET: pickEnv("PAAS_JWT_SECRET", "JWT_SECRET") || base.JWT_SECRET,
+    QR_SECRET: pickEnv("PAAS_QR_SECRET", "QR_SECRET") || base.QR_SECRET,
+    JWT_EXPIRES_IN: pickEnv("PAAS_JWT_EXPIRES_IN") || base.JWT_EXPIRES_IN,
+    QR_TOKEN_TTL_MINUTES:
+      pickEnv("PAAS_QR_TOKEN_TTL_MINUTES") || base.QR_TOKEN_TTL_MINUTES,
+    SUPABASE_URL: pickEnv("PAAS_SUPABASE_URL") || base.SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY:
+      pickEnv("PAAS_SUPABASE_PUBLISHABLE_KEY") || base.SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_ANON_KEY: pickEnv("PAAS_SUPABASE_ANON_KEY") || base.SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_ROLE_KEY:
+      pickEnv("PAAS_SUPABASE_SERVICE_ROLE_KEY") || base.SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_SECRET_KEY: pickEnv("PAAS_SUPABASE_SECRET_KEY") || base.SUPABASE_SECRET_KEY,
+    SUPABASE_PROJECT_REF:
+      pickEnv("PAAS_SUPABASE_PROJECT_REF") || base.SUPABASE_PROJECT_REF,
+    GEMINI_API_KEY: pickEnv("PAAS_GEMINI_API_KEY") || base.GEMINI_API_KEY,
+    GEMINI_MODEL: pickEnv("PAAS_GEMINI_MODEL") || base.GEMINI_MODEL,
+  };
 }
 
 function parseEnvFile(filePath) {
@@ -126,7 +160,9 @@ async function uploadFiles() {
 function buildDeployBody(s3Key) {
   const frontendUrl = `https://${DOMAIN_PREFIX}.${ZONE}`;
   const backendPublicUrl = `https://${DOMAIN_PREFIX}-api.${ZONE}`;
-  const envBackend = parseEnvFile(join(ROOT, "backend", ".env"));
+  const envBackend = mergeBackendSecretsFromProcess(
+    parseEnvFile(join(ROOT, "backend", ".env")),
+  );
 
   const backendEnv = {
     NODE_ENV: "production",
@@ -142,6 +178,8 @@ function buildDeployBody(s3Key) {
     SUPABASE_ANON_KEY: envBackend.SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: envBackend.SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_PROJECT_REF: envBackend.SUPABASE_PROJECT_REF,
+    GEMINI_API_KEY: envBackend.GEMINI_API_KEY,
+    GEMINI_MODEL: envBackend.GEMINI_MODEL,
   };
 
   Object.keys(backendEnv).forEach((k) => {
@@ -152,6 +190,8 @@ function buildDeployBody(s3Key) {
 
   const frontendEnv = {
     NODE_ENV: "production",
+    /** SSR/server: mismo origen público que el browser (fallback en runtime-config) */
+    API_URL: backendPublicUrl,
     NEXT_PUBLIC_API_URL: backendPublicUrl,
     NEXT_PUBLIC_SUPABASE_URL: envBackend.SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: envBackend.SUPABASE_PUBLISHABLE_KEY,

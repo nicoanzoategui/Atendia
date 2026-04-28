@@ -48,6 +48,7 @@ function StudentScanContent() {
         setSuccessRegisteredAt(new Date());
         setScanState('success');
         requestDashboardRefetch();
+        window.setTimeout(() => requestDashboardRefetch(), 500);
       } catch (err) {
         if (!navigator.onLine) {
           try {

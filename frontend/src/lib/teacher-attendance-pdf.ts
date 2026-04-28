@@ -147,10 +147,11 @@ export async function generateAttendancePDF(
   const instrLines = [
     'INSTRUCCIONES PARA COMPLETAR:',
     '· Columna PRESENTE: marcar con ✓ si asistió.',
-    '· Columna AUSENTE: escribir "A" o marcar con X si no asistió (no dejar vacío).',
+    '· Columna AUSENTE: escribir "A" o marcar con X si no asistió.',
+    '· TODOS los ausentes DEBEN estar marcados explícitamente.',
+    '· El docente DEBE firmar la lista al pie.',
+    '· NO dejar campos vacíos (riesgo de que otro complete datos después).',
     '· Columna JUSTIFICADO: marcar con J si corresponde.',
-    '· Todos los ausentes deben estar marcados explícitamente.',
-    '· El docente debe firmar al pie. No dejar casillas sin marca para evitar alteraciones.',
     `· Tabla inferior: hasta ${MANUAL_EXTRA_ROWS} alumnos que no figuran en el sistema; completar nombre, DNI, ID y firmar.`,
   ];
   const instrH = 5.2;
@@ -222,8 +223,8 @@ export async function generateAttendancePDF(
     dni: string,
     ext: string,
   ) => {
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.35);
+    doc.setDrawColor(40, 40, 40);
+    doc.setLineWidth(0.55);
     doc.setFontSize(7.5);
     doc.setTextColor(0, 0, 0);
     let cx = margin;

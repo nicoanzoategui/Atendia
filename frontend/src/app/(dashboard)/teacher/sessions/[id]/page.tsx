@@ -26,6 +26,7 @@ import { getAuthToken } from '@/lib/db/indexed-db';
 import { useQrRotation } from '@/lib/hooks/use-qr-rotation';
 import { useRealtimeAttendance } from '@/lib/hooks/use-realtime-attendance';
 import { getPendingAttendance, savePendingAttendance } from '@/lib/db/pending-attendance-store';
+import { enqueuePendingSheetProcessed } from '@/lib/db/pending-sheet-list-store';
 import { SyncManager } from '@/lib/sync/sync-manager';
 
 type SessionDetail = {
@@ -222,6 +223,13 @@ export default function TeacherSessionDetailPage() {
   const [photoResults, setPhotoResults] = useState<PhotoAnalyzeRow[]>([]);
   const [photoOverrides, setPhotoOverrides] = useState<Record<string, 'present' | 'absent' | 'excused'>>({});
   const [photoSaving, setPhotoSaving] = useState(false);
+  const [sheetListId, setSheetListId] = useState('');
+  const [extraOpen, setExtraOpen] = useState(false);
+  const [extraDoc, setExtraDoc] = useState('');
+  const [extraFirst, setExtraFirst] = useState('');
+  const [extraLast, setExtraLast] = useState('');
+  const [extraStatus, setExtraStatus] = useState<'present' | 'absent' | 'excused'>('present');
+  const [extraSaving, setExtraSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!sessionId) return;
@@ -260,6 +268,10 @@ export default function TeacherSessionDetailPage() {
         const fd = new FormData();
         fd.append('photo', file);
         fd.append('sessionId', sessionId);
+        const lid = sheetListId.trim();
+        if (lid) {
+          fd.append('listId', lid);
+        }
         const base = await getApiBaseUrl();
         const res = await fetch(`${base}/attendance/analyze-photo`, {
           method: 'POST',
@@ -289,7 +301,7 @@ export default function TeacherSessionDetailPage() {
         setPhotoAnalyzing(false);
       }
     },
-    [sessionId],
+    [sessionId, sheetListId],
   );
 
   useEffect(() => {
@@ -502,15 +514,21 @@ export default function TeacherSessionDetailPage() {
     return out;
   }, [liveAttendance, students]);
 
-  async function postAttendance(s: StudentRow, uiStatus: string, notes?: string) {
+  /** synced = OK en API; queued = guardado local para SyncManager; null = error de validación previo a enviar */
+  async function postAttendance(
+    s: StudentRow,
+    uiStatus: string,
+    notes?: string,
+    method: 'manual_teacher' | 'ocr_upload' = 'manual_teacher',
+  ): Promise<'synced' | 'queued' | null> {
     const externalId =
       strField(s.student_external_id) || strField(s.student_id) || String(s.student_external_id ?? s.student_id ?? '');
     if (!externalId) {
       setError('No se pudo identificar al alumno.');
-      return;
+      return null;
     }
     const apiStatus = uiStatus === 'excused' ? 'justified' : uiStatus;
-    if (apiStatus !== 'present' && apiStatus !== 'absent' && apiStatus !== 'justified') return;
+    if (apiStatus !== 'present' && apiStatus !== 'absent' && apiStatus !== 'justified') return null;
 
     const storageKey = manualListStudentId(s);
     if (apiStatus === 'justified' && notes != null && notes.trim() !== '') {
@@ -521,18 +539,21 @@ export default function TeacherSessionDetailPage() {
       }
     }
 
+    const pendingPayload = {
+      offline_id: crypto.randomUUID(),
+      student_id: externalId,
+      class_session_id: sessionId,
+      qr_token: '',
+      scanned_at: new Date().toISOString(),
+      source: 'manual' as const,
+      manual_status: apiStatus as 'present' | 'absent' | 'justified',
+      manual_method: method,
+    };
+
     if (!navigator.onLine) {
-      await savePendingAttendance({
-        offline_id: crypto.randomUUID(),
-        student_id: externalId,
-        class_session_id: sessionId,
-        qr_token: '',
-        scanned_at: new Date().toISOString(),
-        source: 'manual',
-        manual_status: apiStatus as 'present' | 'absent' | 'justified',
-      });
+      await savePendingAttendance(pendingPayload);
       setPendingIds((prev) => new Set(prev).add(externalId));
-      return;
+      return 'queued';
     }
     try {
       await apiClient('/attendance/manual', {
@@ -540,8 +561,11 @@ export default function TeacherSessionDetailPage() {
         body: JSON.stringify({
           sessionId,
           studentExternalId: externalId,
+          studentId: strField(s.student_id) && /^[0-9a-f-]{36}$/i.test(strField(s.student_id))
+            ? strField(s.student_id)
+            : undefined,
           status: apiStatus,
-          method: 'manual_teacher',
+          method,
         }),
       });
       setPendingIds((prev) => {
@@ -550,18 +574,67 @@ export default function TeacherSessionDetailPage() {
         return next;
       });
       setError(null);
+      return 'synced';
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
-      await savePendingAttendance({
-        offline_id: crypto.randomUUID(),
-        student_id: externalId,
-        class_session_id: sessionId,
-        qr_token: '',
-        scanned_at: new Date().toISOString(),
-        source: 'manual',
-        manual_status: apiStatus as 'present' | 'absent' | 'justified',
-      });
+      await savePendingAttendance(pendingPayload);
       setPendingIds((prev) => new Set(prev).add(externalId));
+      return 'queued';
+    }
+  }
+
+  async function addExtraStudentFromDocument() {
+    const doc = extraDoc.trim();
+    const digits = doc.replace(/\D/g, '');
+    if (digits.length < 6) {
+      setError('Ingresá un documento válido (al menos 6 dígitos).');
+      return;
+    }
+    const dup = students.some((u) => {
+      const e = rosterFields(u).ext.replace(/\D/g, '');
+      const se = strField(u.student_external_id).replace(/\D/g, '');
+      return (e !== '' && e === digits) || (se !== '' && se === digits);
+    });
+    if (dup) {
+      setError('Ese documento ya figura en la comisión.');
+      return;
+    }
+    setExtraSaving(true);
+    setError(null);
+    try {
+      const res = await apiClient<{ student: StudentRow | null }>(
+        `/sessions/${encodeURIComponent(sessionId)}/roster/from-document`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            document: doc,
+            firstName: extraFirst.trim() || undefined,
+            lastName: extraLast.trim() || undefined,
+          }),
+        },
+      );
+      const st = res.student;
+      if (!st) {
+        setError('No se pudo obtener el alumno agregado.');
+        return;
+      }
+      const ui =
+        extraStatus === 'excused'
+          ? 'excused'
+          : extraStatus === 'present'
+            ? 'present'
+            : 'absent';
+      await postAttendance(st, ui, undefined, 'ocr_upload');
+      await load();
+      setExtraOpen(false);
+      setExtraDoc('');
+      setExtraFirst('');
+      setExtraLast('');
+      setExtraStatus('present');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo agregar al alumno');
+    } finally {
+      setExtraSaving(false);
     }
   }
 
@@ -1035,6 +1108,25 @@ export default function TeacherSessionDetailPage() {
       {showHojaPanel ? (
         <div className="space-y-4">
           {photoResults.length === 0 ? (
+            <div className="rounded-[16px] border border-gray-200 bg-white p-4 shadow-sm">
+              <label className="block text-xs font-black uppercase tracking-wide text-[#64748B]">
+                ID de lista del PDF <span className="font-semibold normal-case text-[#94A3B8]">(opcional)</span>
+              </label>
+              <input
+                type="text"
+                value={sheetListId}
+                onChange={(e) => setSheetListId(e.target.value)}
+                placeholder="Ej. UUID impreso bajo &quot;ID de lista&quot;"
+                className="mt-2 w-full rounded-[12px] border border-gray-200 bg-[#F8FAFC] px-3 py-2.5 font-mono text-xs text-[#0D1B4B]"
+                autoComplete="off"
+              />
+              <p className="mt-1 text-[10px] font-semibold leading-snug text-[#94A3B8]">
+                Si cargás el mismo nombre de lista que uno ya procesado, no se volverá a analizar esa hoja para esta
+                clase.
+              </p>
+            </div>
+          ) : null}
+          {photoResults.length === 0 ? (
             <div className="atendee-card border border-gray-100 p-5 shadow-sm">
               <label className="block cursor-pointer">
                 <input
@@ -1176,11 +1268,91 @@ export default function TeacherSessionDetailPage() {
                 </ul>
               </div>
 
+              <div className="rounded-[16px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-4">
+                <button
+                  type="button"
+                  onClick={() => setExtraOpen((v) => !v)}
+                  className="text-xs font-black uppercase tracking-widest text-[#1B3FD8]"
+                >
+                  {extraOpen ? '− Cerrar' : '+ Agregar alumno no detectado'}
+                </button>
+                {extraOpen ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-[11px] font-semibold leading-snug text-[#64748B]">
+                      Validamos el documento contra el padrón del instituto; el alumno debe existir como alumno con ese
+                      DNI.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <input
+                        type="text"
+                        placeholder="Nombre"
+                        value={extraFirst}
+                        onChange={(e) => setExtraFirst(e.target.value)}
+                        className="rounded-[10px] border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0D1B4B]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Apellido"
+                        value={extraLast}
+                        onChange={(e) => setExtraLast(e.target.value)}
+                        className="rounded-[10px] border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0D1B4B]"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="DNI / documento (obligatorio)"
+                      value={extraDoc}
+                      onChange={(e) => setExtraDoc(e.target.value)}
+                      className="w-full rounded-[10px] border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0D1B4B]"
+                      autoComplete="off"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <span className="w-full text-[10px] font-black uppercase text-[#64748B]">Estado:</span>
+                      {(
+                        [
+                          ['present', 'Presente'],
+                          ['absent', 'Ausente'],
+                          ['excused', 'Justificado'],
+                        ] as const
+                      ).map(([k, label]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setExtraStatus(k)}
+                          className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase ${
+                            extraStatus === k
+                              ? 'bg-[#1B3FD8] text-white'
+                              : 'bg-white text-[#64748B] ring-1 ring-gray-200'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={extraSaving || extraDoc.trim().length < 6}
+                      onClick={() => void addExtraStudentFromDocument()}
+                      className="w-full rounded-[12px] bg-[#0D1B4B] py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                    >
+                      {extraSaving ? 'Guardando…' : 'Agregar y guardar estado'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
               <p className="rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-relaxed text-amber-950">
                 Los alumnos ausentes deben quedar explícitamente marcados (no dejes casillas vacías: usá{' '}
                 <span className="font-black">A</span> o <span className="font-black">X</span> en ausente, o
                 corregí con los botones P / A / J cuando la confianza del análisis es baja).
               </p>
+
+              {typeof navigator !== 'undefined' && !navigator.onLine ? (
+                <p className="rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[11px] font-bold leading-snug text-amber-950">
+                  Modo offline: las marcas quedan en cola local y el ID de lista se enviará al recuperar Internet
+                  (el indicador inferior derecho muestra pendientes).
+                </p>
+              ) : null}
 
               <button
                 type="button"
@@ -1190,6 +1362,7 @@ export default function TeacherSessionDetailPage() {
                   setPhotoSaving(true);
                   setError(null);
                   try {
+                    let anyQueuedOffline = false;
                     for (const row of photoResults) {
                       const ext = row.student_external_id;
                       const st =
@@ -1203,7 +1376,31 @@ export default function TeacherSessionDetailPage() {
                       );
                       if (!s) continue;
                       const ui = st === 'excused' ? 'excused' : st === 'present' ? 'present' : 'absent';
-                      await postAttendance(s, ui);
+                      const out = await postAttendance(s, ui, undefined, 'ocr_upload');
+                      if (out === 'queued') anyQueuedOffline = true;
+                    }
+                    const lid = sheetListId.trim();
+                    const lidOk =
+                      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                        lid,
+                      );
+                    if (lidOk) {
+                      if (anyQueuedOffline) {
+                        await enqueuePendingSheetProcessed({
+                          offline_id: crypto.randomUUID(),
+                          class_session_id: sessionId,
+                          list_id: lid,
+                        });
+                      } else {
+                        try {
+                          await apiClient('/attendance/sheet-processed', {
+                            method: 'POST',
+                            body: JSON.stringify({ sessionId, listId: lid }),
+                          });
+                        } catch {
+                          /* lista ya registrada u otra carrera */
+                        }
+                      }
                     }
                     try {
                       sessionStorage.setItem(`atendee-hoja-saved-${sessionId}`, String(Date.now()));

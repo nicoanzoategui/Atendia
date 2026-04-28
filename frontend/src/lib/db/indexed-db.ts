@@ -13,7 +13,7 @@ export interface AuthToken {
 }
 
 const DB_NAME = 'atendee_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export async function initDB(): Promise<IDBPDatabase> {
   return openDB(DB_NAME, DB_VERSION, {
@@ -33,6 +33,10 @@ export async function initDB(): Promise<IDBPDatabase> {
       // v2: pool de tokens QR pre-generados para modo offline del docente
       if (!db.objectStoreNames.contains('cached_qr_tokens')) {
         db.createObjectStore('cached_qr_tokens', { keyPath: 'session_id' });
+      }
+      // v3: POST /attendance/sheet-processed diferido (lista en papel sin red)
+      if (!db.objectStoreNames.contains('pending_sheet_list')) {
+        db.createObjectStore('pending_sheet_list', { keyPath: 'offline_id' });
       }
     },
   });

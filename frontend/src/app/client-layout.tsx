@@ -19,9 +19,11 @@ export default function RootLayout({
     if (typeof window === 'undefined') return;
     if (window.location.pathname === '/login') return;
 
-    router.replace('/login');
+    requestAnimationFrame(() => {
+      router.replace('/login');
+    });
 
-    const fallbackMs = 2000;
+    const fallbackMs = 3500;
     const t = window.setTimeout(() => {
       if (window.location.pathname !== '/login') {
         window.location.replace(`${window.location.origin}/login`);
